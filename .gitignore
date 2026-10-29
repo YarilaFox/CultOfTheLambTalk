@@ -1,0 +1,16 @@
+bin/
+obj/
+deps/
+backups/
+release/
+*.user
+*.suo
+*.log
+.env*
+*.pem
+*.pfx
+*.p12
+*.secrets.*
+FollowerTalk.keys.json
+FollowerTalk.memory.*.json
+FollowerTalk.requests.json
