@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace FollowerTalk;
 
-[BepInPlugin("arikm.cotl.followertalk", "Follower Talk", "0.4.0")]
+[BepInPlugin("arikm.cotl.followertalk", "Follower Talk", "0.4.1")]
 [BepInDependency("io.github.xhayper.COTL_API")]
 public sealed class Plugin : BaseUnityPlugin
 {
