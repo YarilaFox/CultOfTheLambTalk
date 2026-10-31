@@ -1,5 +1,7 @@
 # Follower Talk
 
+**Русский** | [English](README_EN.md)
+
 **[Скачать версию 0.5.0](https://github.com/YarilaFox/CultOfTheLambTalk/releases/tag/v0.5.0)** · Исходный код доступен для ознакомления, но не является open source: условия использования см. в [LICENSE](LICENSE).
 
 ## Установка
