@@ -24,15 +24,18 @@ internal sealed class TalkCommand : CustomFollowerCommand
 
     public override string InternalName => "FOLLOWER_TALK_PROTOTYPE";
 
-    public override string GetTitle(Follower follower) => "Поговорить";
+    public override string GetTitle(Follower follower) =>
+        UiText.Get(Plugin.Instance.UiLanguage, "talk.title");
 
-    public override string GetDescription(Follower follower) => "Написать последователю.";
+    public override string GetDescription(Follower follower) =>
+        UiText.Get(Plugin.Instance.UiLanguage, "talk.description");
 
     public override void Execute(
         interaction_FollowerInteraction interaction,
         FollowerCommands finalCommand = FollowerCommands.None)
     {
         Follower follower = interaction.follower;
+        FollowerActivity activity = FollowerContext.Snapshot(follower, interaction);
         bool held = false;
         try
         {
@@ -44,7 +47,7 @@ internal sealed class TalkCommand : CustomFollowerCommand
         }
         catch (System.Exception) { }
         if (!held) base.Execute(interaction, finalCommand);
-        Plugin.Instance.OpenTalk(follower, held ? interaction : null);
+        Plugin.Instance.OpenTalk(follower, held ? interaction : null, activity);
     }
 
     internal static void ReleaseFollower(interaction_FollowerInteraction? interaction)

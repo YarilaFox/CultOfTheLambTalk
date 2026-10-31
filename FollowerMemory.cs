@@ -43,6 +43,24 @@ internal sealed class FollowerMemory
         Save();
     }
 
+    public void SetDayMood(Follower follower, string emotion)
+    {
+        if (emotion != "angry" && emotion != "sad" && emotion != "worried" &&
+            emotion != "amused") return;
+        JObject state = FollowerState(follower);
+        state["day_mood"] = emotion;
+        state["day_mood_until"] = DataManager.Instance.CurrentDayIndex + 1;
+        Save();
+    }
+
+    public string DayMood(Follower follower)
+    {
+        JObject state = FollowerState(follower);
+        return (state["day_mood_until"]?.Value<int>() ?? 0) >
+               DataManager.Instance.CurrentDayIndex
+            ? state["day_mood"]?.Value<string>() ?? "" : "";
+    }
+
     public void Remember(Follower follower, string note, string source)
     {
         note = note.Trim();
@@ -79,49 +97,72 @@ internal sealed class FollowerMemory
         while (announcements.Count > 5) announcements.RemoveAt(0);
         data["announcements"] = announcements;
         Match address = Regex.Match(text,
-            @"(?:называйте|зовите)\s+меня\s+(.+?)(?:[.!?]|$)",
+            @"(?:(?:называйте|зовите)\s+меня|(?:please\s+)?(?:call|address)\s+me(?:\s+as)?)\s+(.+?)(?:[.!?]|$)",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         if (address.Success)
             data["preferred_address"] = address.Groups[1].Value.Trim(' ', '"', '\'');
         return Save();
     }
 
-    public string Context(Follower follower)
+    public string Context(Follower follower, string language)
     {
         JObject state = FollowerState(follower);
         var parts = new List<string>();
+        string mood = DayMood(follower);
+        if (mood.Length > 0)
+            parts.Add(TalkLanguage.Pick(language,
+                "Настроение после недавнего разговора: ",
+                "Mood after a recent conversation: ") + mood);
         if (state["notes"] is JArray notes && notes.Count > 0)
-            parts.Add("Личные важные наблюдения: " + string.Join("; ", notes
+            parts.Add(TalkLanguage.Pick(language,
+                "Личные важные наблюдения: ", "Important personal notes: ") +
+                string.Join("; ", notes
                 .Select(item =>
                 {
                     string? note = item["text"]?.Value<string>();
                     string? source = item["source"]?.Value<string>();
                     if (string.IsNullOrEmpty(note)) return null;
                     if (string.IsNullOrEmpty(source)) return note;
-                    return note + " (свидетельство: " + source.Substring(0,
+                    return note + TalkLanguage.Pick(language,
+                        " (свидетельство: ", " (source: ") + source.Substring(0,
                         Math.Min(120, source.Length)) + ")";
                 }).Where(item => !string.IsNullOrEmpty(item))));
         if (data["announcements"] is JArray announcements && announcements.Count > 0)
-            parts.Add("Слова игрока, сказанные всему культу у алтаря: " +
+            parts.Add(TalkLanguage.Pick(language,
+                "Слова игрока, сказанные всему культу у алтаря: ",
+                "Player's words addressed to the whole cult at the altar: ") +
                 string.Join("; ", announcements.Select(item => item["text"]?.Value<string>())
                     .Where(item => !string.IsNullOrEmpty(item))));
         string? address = data["preferred_address"]?.Value<string>();
         if (!string.IsNullOrWhiteSpace(address))
-            parts.Add("Игрок попросил обращаться к нему как «" + address +
-                "». Если обращаешься к игроку по имени или титулу, используй это обращение " +
-                "в подходящей грамматической форме; не повторяй его в каждой реплике");
-        return parts.Count == 0 ? "Личных и общих долговременных заметок пока нет." :
+            parts.Add(TalkLanguage.Pick(language,
+                "Игрок попросил обращаться к нему как «" + address +
+                    "». Если обращаешься к игроку по имени или титулу, используй это обращение " +
+                    "в подходящей грамматической форме; не повторяй его в каждой реплике",
+                "The player asked to be addressed as '" + address +
+                    "'. Use this name or title naturally when addressing them, not in every reply"));
+        return parts.Count == 0 ? TalkLanguage.Pick(language,
+            "Личных и общих долговременных заметок пока нет.",
+            "No long-term personal or shared notes yet.") :
             string.Join(". ", parts) + ".";
     }
 
     private JObject FollowerState(Follower follower)
     {
         EnsureSave();
-        JObject followers = data["followers"] as JObject ?? new JObject();
-        data["followers"] = followers;
+        JObject? followers = data["followers"] as JObject;
+        if (followers == null)
+        {
+            followers = new JObject();
+            data["followers"] = followers;
+        }
         string id = follower.Brain.Info.ID.ToString();
-        JObject state = followers[id] as JObject ?? new JObject();
-        followers[id] = state;
+        JObject? state = followers[id] as JObject;
+        if (state == null)
+        {
+            state = new JObject();
+            followers[id] = state;
+        }
         return state;
     }
 

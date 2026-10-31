@@ -8,6 +8,8 @@
     <DependencyDir Condition="'$(DependencyDir)' == ''">$(MSBuildProjectDirectory)\deps</DependencyDir>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Remove="tests/**/*.cs" />
+    <EmbeddedResource Include="Resources/ui.json" LogicalName="FollowerTalk.ui.json" />
     <Reference Include="Assembly-CSharp">
       <HintPath>$(GameDir)\Cult Of The Lamb_Data\Managed\Assembly-CSharp.dll</HintPath>
       <Private>false</Private>
@@ -20,6 +22,10 @@
       <HintPath>$(GameDir)\Cult Of The Lamb_Data\Managed\Unity.TextMeshPro.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="spine-unity">
+      <HintPath>$(GameDir)\Cult Of The Lamb_Data\Managed\spine-unity.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="UnityEngine.CoreModule">
       <HintPath>$(GameDir)\Cult Of The Lamb_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
@@ -30,6 +36,10 @@
     </Reference>
     <Reference Include="UnityEngine.IMGUIModule">
       <HintPath>$(GameDir)\Cult Of The Lamb_Data\Managed\UnityEngine.IMGUIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UI">
+      <HintPath>$(GameDir)\Cult Of The Lamb_Data\Managed\UnityEngine.UI.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.InputLegacyModule">

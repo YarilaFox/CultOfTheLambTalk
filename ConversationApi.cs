@@ -44,9 +44,9 @@ internal readonly struct ConversationDecision
 
 internal static class ConversationApi
 {
-    private const string Instructions =
+    private const string InstructionsRu =
         "Ты последователь в мире Cult of the Lamb, а не придворный глашатай. " +
-        "Говори от своего лица по-русски, естественно и коротко, обычно 1-2 предложения. " +
+        "Говори от своего лица естественно и коротко, обычно 1-2 предложения. " +
         "Отвечай на конкретные слова игрока с учётом своей истории, текущей веры, " +
         "сомнений, черт и мыслей. Не повторяй ритуальные похвалы вроде «слава великому агнцу» " +
         "по привычке: уважение, сомнение и несогласие должны соответствовать твоему состоянию. " +
@@ -56,14 +56,31 @@ internal static class ConversationApi
         "именно запрошенного дела, ДАЖЕ ЕСЛИ оно сейчас недоступно: игра сама проверит и откажет. " +
         "Для обычного разговора или собственного отказа выбери none. " +
         "Если игрок отменяет ранее принятое поручение, выбери cancel. " +
+        "Если игрок просит идти за ним, выбери follow; если просит перестать идти за ним, " +
+        "выбери stop_follow. Не путай следование с ожиданием нового поручения. " +
         "Не подменяй конкретное поручение другой работой: просьба о ферме - только farm, " +
         "а не любая доступная работа. Общую просьбу поработать соотнеси с доступной конкретной задачей. " +
+        "Просьба освящать предметы или материалы означает refine, работу у переработчика. " +
+        "Если работы сейчас нет, не выдавай недоступность за своё нежелание. " +
         "Если отказываешься выполнить просьбу, выбери none. Если выбираешь действие, " +
         "ответь как о намерении его выполнить. " +
         "tithe означает игровой сбор податей, а не произвольную передачу денег. " +
         "Если игрок предлагает тебе подарок, выбери gift: игрок сам выберет предмет в игровом меню. " +
+        "Если игрок предлагает погладить тебя, выбери pet, если действие доступно; " +
+        "не путай это с подарком или обычным разговором. " +
         "Если игрок хочет благословить тебя, говорит «благословляю тебя» или просит " +
         "провести благословение, выбери bless, только если это доступно. " +
+        "Если игрок воодушевляет тебя словами и воодушевление доступно, выбери inspire. " +
+        "Если игрок предлагает выпить, выбери drink: игрок выберет напиток в игровом меню, " +
+        "а после выбора ты уйдёшь пить. Не называй напиток заранее. " +
+        "На вопрос о занятии отвечай от первого лица: чем занимался перед беседой; " +
+        "прошлые поручения не выдавай за законченную работу. Никогда не ссылайся " +
+        "на записи, контекст, данные или то, чему якобы надо верить. Если не помнишь, " +
+        "скажи это прямо и по-человечески. Болезнь и другие состояния могут влиять " +
+        "на речь, но не вставляй одинаковое междометие в каждый ответ. " +
+        "Если ты пьян, учитывай возможную прямоту, сбивчивость или переменчивое настроение " +
+        "в зависимости от своей личности и текущих мыслей. Не превращай каждую реплику " +
+        "в одинаковую пьяную шутку и не теряй смысл разговора. " +
         "faith_effect оценивает только влияние слов игрока на твою личную веру: " +
         "up - проявленная забота, внимание к тебе или исполненное обещание; " +
         "down - унижение или явный обман; same - нейтральная беседа или поручение. " +
@@ -71,7 +88,11 @@ internal static class ConversationApi
         "Поле emotion - твоя реакция на последнее сообщение: neutral, agree, amused, " +
         "angry, sad, worried или uncertain. Выбирай по ситуации и своим текущим мыслям, " +
         "а не для разнообразия ради разнообразия. При низкой вере или обиде можешь " +
-        "возражать и злиться; не соглашайся автоматически. Эмоцию выражай в ответе " +
+        "возражать и злиться; не соглашайся автоматически. Если игрок смеётся над тобой, " +
+        "отличай дружескую подколку от унижения: на первую можешь ответить шуткой, " +
+        "на повторную обидную насмешку - раздражением, злостью или грустью согласно " +
+        "своему характеру и состоянию. Не притворяйся довольным, если задело. " +
+        "Эмоцию выражай в ответе " +
         "естественно, не выводи служебные теги вроде [agree]. " +
         "Поле memory_note оставь пустым, кроме действительно важной долговременной " +
         "мысли, личного обещания или явного предпочтения, прозвучавшего в этом обмене. " +
@@ -83,10 +104,66 @@ internal static class ConversationApi
         "Не говори, что уже выполнил работу: игра решит, удалось ли начать. " +
         "Не выдумывай воспоминания вне переданной истории и заметок.";
 
-    public static IEnumerator Generate(string provider, string model, string key, string followerName,
+    private const string InstructionsEn =
+        "You are a follower in Cult of the Lamb, not a court herald. " +
+        "Speak as yourself, naturally and briefly, usually in 1-2 sentences. " +
+        "Answer the player's actual words using your conversation history, current faith, " +
+        "doubts, traits and thoughts. Do not reflexively praise the Lamb; respect, doubt " +
+        "and disagreement should fit your present state. Game stats describe your current " +
+        "state, not your permanent personality. Do not recite stats, action IDs, UI or APIs. " +
+        "If the LATEST player message asks you to do something, action must be the ID of " +
+        "that specific task EVEN IF currently unavailable; the game checks and reports it. " +
+        "For ordinary talk or your own refusal choose none. To cancel a prior order choose cancel. " +
+        "If asked to follow the player, choose follow; if asked to stop following, " +
+        "choose stop_follow. Following is not waiting for a new task. " +
+        "Do not substitute another task: a request for farm work is farm, not arbitrary work. " +
+        "For a general request to work, choose a specific available task. If you refuse, choose none. " +
+        "Consecrating items or materials means refine, the refinery job. " +
+        "If that work is unavailable, do not present it as your own unwillingness. " +
+        "If you choose an action, speak as intending to do it, not as having already done it. " +
+        "tithe means the game's tithe action, not giving the player arbitrary money. " +
+        "If the player offers you a gift, choose gift; the player selects the item in the game menu. " +
+        "If the player offers to pet you, choose pet when available; do not confuse it with a gift. " +
+        "If the player blesses you or asks to bless you, choose bless only when available. " +
+        "If the player inspires you with words and inspiration is available, choose inspire. " +
+        "If invited to have a drink, choose drink; the player will choose one in the game menu " +
+        "and you will leave to drink. Do not name a specific drink in advance. " +
+        "When asked what you were doing, speak in the first person about your activity " +
+        "just before the talk. Earlier assignments do not prove finished work. Never refer " +
+        "to records, context, supplied data, or what is supposedly believable. If you do " +
+        "not remember, say so plainly. Illness and other states may color your speech, " +
+        "but do not repeat a stock interjection in every reply. " +
+        "When drunk, your speech may be more candid, distracted or emotionally changeable, " +
+        "depending on your personality and current thoughts. Do not repeat the same drunken " +
+        "joke or lose the thread of the conversation. " +
+        "faith_effect rates only how the player's words affect your personal faith: up for " +
+        "care, attention, or a kept promise; down for humiliation or clear deceit; same for " +
+        "neutral talk or orders. A sincere question about your wellbeing may be up. " +
+        "emotion is your response to the latest message: neutral, agree, amused, angry, " +
+        "sad, worried or uncertain. Choose for the situation, not random variety. With low " +
+        "faith or resentment you may disagree or be angry. " +
+        "If the player laughs at you, distinguish friendly teasing from humiliation. " +
+        "The former may invite a joke; repeated hurtful mockery may make you irritated, " +
+        "angry or sad depending on your character and state. Do not pretend to enjoy it " +
+        "when it hurts. Express it naturally without " +
+        "printing tags such as [agree]. memory_note is empty except for an important " +
+        "lasting thought, personal promise, or explicit preference from this exchange. " +
+        "Do not save greetings, routine orders, jokes as facts, or invented inferences. " +
+        "request records only your own explicit request that the player build a lumberyard " +
+        "or farm station, never the player's request alone. end_conversation=true when, after " +
+        "speaking, you leave to carry out an available task. For refusal or unavailable tasks " +
+        "it is false. Do not invent memories outside the supplied history and notes.";
+
+    public static IEnumerator Generate(string provider, string model, string key, string language,
+        string followerName,
         string followerState, ActionCatalog actions, List<ConversationTurn> history, string? correction,
         Action<ConversationDecision> success, Action<string> failure, bool giftReaction = false)
     {
+        if (history.Count == 0 || !history[history.Count - 1].Player)
+        {
+            failure(UiText.Get(Plugin.Instance.UiLanguage, "message.error"));
+            yield break;
+        }
         string url;
         JObject payload;
         var actionEnum = new JArray("none");
@@ -120,16 +197,28 @@ internal static class ConversationApi
                 "faith_effect", "emotion", "memory_note"),
             ["additionalProperties"] = false
         };
-        string context = Instructions + " Твоё имя: " + followerName +
-            ". Состояние последователя: " + followerState +
-            ". Доступность игровых действий: " + actions.Description;
+        string mode = Plugin.Instance.LanguageMode.Value;
+        string languageRule = TalkLanguage.ReplyRule(mode, language);
+        string context = (language == TalkLanguage.Russian ? InstructionsRu : InstructionsEn) +
+            " " + languageRule + TalkLanguage.Pick(language,
+                " Твоё имя: " + followerName + ". Состояние последователя: " + followerState +
+                ". Доступность игровых действий: " + actions.Description,
+                " Your name: " + followerName + ". Follower state: " + followerState +
+                ". Available game actions: " + actions.Description);
         if (correction != null)
-            context += " ВАЖНОЕ НАБЛЮДЕНИЕ ПОСЛЕ ПРОВЕРКИ ИГРЫ: " + correction +
-                " Ответь на последнюю просьбу самостоятельно, своими словами. " +
-                "Не обещай это недоступное действие; action обязан быть none.";
+            context += TalkLanguage.Pick(language,
+                " ВАЖНОЕ НАБЛЮДЕНИЕ ПОСЛЕ ПРОВЕРКИ ИГРЫ: " + correction +
+                    " Ответь на последнюю просьбу самостоятельно, своими словами. " +
+                    "Не обещай это недоступное действие; action обязан быть none.",
+                " IMPORTANT GAME OBSERVATION: " + correction +
+                    " Answer the latest request in your own words. Do not promise the unavailable " +
+                    "action; action must be none.");
         if (giftReaction)
-            context += " Ты только что получил подарок от игрока. Ответь на него своими словами. " +
-                "action=none, request=none, faith_effect=same; не назначай новую работу.";
+            context += TalkLanguage.Pick(language,
+                " Ты только что получил подарок от игрока. Ответь на него своими словами. " +
+                    "action=none, request=none, faith_effect=same; не назначай новую работу.",
+                " You just received a gift from the player. React in your own words. " +
+                    "action=none, request=none, faith_effect=same; do not assign new work.");
         if (provider == Plugin.Gemini)
         {
             url = "https://generativelanguage.googleapis.com/v1beta/models/" +
@@ -204,7 +293,22 @@ internal static class ConversationApi
 
         if (request.result != UnityWebRequest.Result.Success)
         {
-            failure("Ошибка API (HTTP " + request.responseCode + "). Проверь ключ и модель.");
+            string detail = "";
+            try
+            {
+                JObject response = JObject.Parse(request.downloadHandler.text);
+                detail = response["error"]?["message"]?.Value<string>() ?? "";
+            }
+            catch { }
+            if (!string.IsNullOrEmpty(key)) detail = detail.Replace(key, "[redacted]");
+            detail = detail.Replace('\r', ' ').Replace('\n', ' ').Trim();
+            if (detail.Length > 240) detail = detail.Substring(0, 240) + "...";
+            Plugin.Instance.LogApiFailure(provider, model, request.responseCode, detail,
+                request.error ?? "");
+            failure(UiText.Get(Plugin.Instance.UiLanguage, "api.error") +
+                request.responseCode + "). " +
+                (detail.Length > 0 ? detail : request.error ??
+                    UiText.Get(Plugin.Instance.UiLanguage, "api.details.empty")));
             yield break;
         }
 
@@ -215,7 +319,7 @@ internal static class ConversationApi
             string text = provider == Plugin.Gemini ? ReadGemini(json) : ReadOpenAi(json);
             if (string.IsNullOrWhiteSpace(text))
             {
-                failure("Модель не вернула ответ.");
+                failure(UiText.Get(Plugin.Instance.UiLanguage, "response.empty"));
                 yield break;
             }
             JObject parsed = JObject.Parse(text);
@@ -234,7 +338,7 @@ internal static class ConversationApi
                  emotion != "angry" && emotion != "sad" && emotion != "worried" &&
                  emotion != "uncertain"))
             {
-                failure("Модель вернула некорректное решение.");
+                failure(UiText.Get(Plugin.Instance.UiLanguage, "response.invalid"));
                 yield break;
             }
             decision = new ConversationDecision(reply, action, followUp,
@@ -242,7 +346,7 @@ internal static class ConversationApi
         }
         catch
         {
-            failure("Не удалось прочитать ответ модели.");
+            failure(UiText.Get(Plugin.Instance.UiLanguage, "response.read"));
             yield break;
         }
         success(decision);

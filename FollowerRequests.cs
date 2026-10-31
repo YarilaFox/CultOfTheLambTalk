@@ -32,28 +32,32 @@ internal sealed class FollowerRequests
     public static bool IsKnownRequest(string request) =>
         request == "none" || request == "build_lumberyard" || request == "build_farm_station";
 
-    public string Context(Follower follower)
+    public string Context(Follower follower, string language)
     {
         JObject state = State(follower);
         var details = new List<string>();
         if (state["requests"] is JObject requests && requests.Count > 0)
-            details.Add("ожидает: " + string.Join(", ", requests.Properties()
-                .Select(item => RequestName(item.Name))));
+            details.Add(TalkLanguage.Pick(language, "ожидает: ", "awaiting: ") +
+                string.Join(", ", requests.Properties()
+                    .Select(item => RequestName(item.Name, language))));
         string? fulfilled = state["fulfilled"]?.Value<string>();
         if (!string.IsNullOrEmpty(fulfilled))
-            details.Add("после его просьбы появилась " + RequestName(fulfilled) +
-                "; игра уже учла выполненную просьбу");
-        return details.Count == 0 ? "Нет ожидающих личных просьб." : string.Join("; ", details);
+            details.Add(TalkLanguage.Pick(language,
+                "после его просьбы появилась ", "after their request, a ") +
+                RequestName(fulfilled, language) + TalkLanguage.Pick(language,
+                    "; игра уже учла выполненную просьбу",
+                    " was built; the game has already credited this request"));
+        return details.Count == 0 ? TalkLanguage.Pick(language,
+            "Нет ожидающих личных просьб.", "No pending personal requests.") :
+            string.Join("; ", details);
     }
 
     public void ObserveReply(Follower follower, ConversationDecision decision)
     {
         JObject state = State(follower);
         bool changed = false;
-        bool saidRequest = decision.Request == "build_lumberyard"
-            ? decision.Reply.IndexOf("лесопил", StringComparison.OrdinalIgnoreCase) >= 0
-            : decision.Request == "build_farm_station" &&
-              decision.Reply.IndexOf("ферм", StringComparison.OrdinalIgnoreCase) >= 0;
+        bool saidRequest = decision.Request == "build_lumberyard" ||
+            decision.Request == "build_farm_station";
         if (saidRequest)
         {
             JObject requests = state["requests"] as JObject ?? new JObject();
@@ -114,10 +118,10 @@ internal sealed class FollowerRequests
         return state;
     }
 
-    private static string RequestName(string request) => request switch
+    private static string RequestName(string request, string language) => request switch
     {
-        "build_lumberyard" => "лесопилка",
-        "build_farm_station" => "фермерская станция",
+        "build_lumberyard" => TalkLanguage.Pick(language, "лесопилка", "lumberyard"),
+        "build_farm_station" => TalkLanguage.Pick(language, "фермерская станция", "farm station"),
         _ => request
     };
 

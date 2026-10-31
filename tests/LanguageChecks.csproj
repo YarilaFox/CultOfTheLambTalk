@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../TalkLanguage.cs" Link="TalkLanguage.cs" />
+    <Compile Include="../UiText.cs" Link="UiText.cs" />
+    <Compile Include="../DialogueDraft.cs" Link="DialogueDraft.cs" />
+    <Compile Include="Program.cs" />
+    <EmbeddedResource Include="../Resources/ui.json" LogicalName="FollowerTalk.ui.json" />
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>F:\SteamLibrary\steamapps\common\Cult of the Lamb\Cult Of The Lamb_Data\Managed\Newtonsoft.Json.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

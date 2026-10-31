@@ -12,6 +12,7 @@ internal sealed partial class TalkWindow
     private readonly Dictionary<string, string> stagedKeys = new();
     private readonly Dictionary<string, string> stagedModels = new();
     private Follower? selectedFollower;
+    private FollowerActivity observedActivity;
     private interaction_FollowerInteraction? heldInteraction;
     private string? pendingAction;
     private bool talkOpen;
@@ -29,16 +30,19 @@ internal sealed partial class TalkWindow
     private string editedKey = "";
     private string editedModel = "";
     private string selectedProvider = Plugin.OpenAi;
+    private string SettingsLanguage => plugin.UiLanguage;
     public TalkWindow(Plugin plugin)
     {
         this.plugin = plugin;
         native = new NativeDialogue(plugin);
     }
 
-    public void OpenTalk(Follower follower, interaction_FollowerInteraction? interaction)
+    public void OpenTalk(Follower follower, interaction_FollowerInteraction? interaction,
+        FollowerActivity? activity = null)
     {
         if (talkOpen) CloseTalk();
         selectedFollower = follower;
+        observedActivity = activity ?? FollowerContext.Snapshot(follower, interaction);
         heldInteraction = interaction;
         pendingAction = null;
         talkOpen = true;
@@ -138,6 +142,7 @@ internal sealed partial class TalkWindow
         editedKey = "";
         stagedKeys.Clear();
         native.SetSettingsVisible(false);
+        native.RefreshInputLanguage();
         if (!talkOpen) Time.timeScale = previousTimeScale;
     }
 
@@ -155,23 +160,11 @@ internal sealed partial class TalkWindow
         if (message.Length == 0) return;
         if (!plugin.Memory.Announce(message))
         {
-            broadcastStatus = "Не удалось сохранить слова для этого сейва.";
+            broadcastStatus = UiText.Get(plugin.UiLanguage, "broadcast.error");
             return;
         }
         plugin.LogAnnouncement(message);
         broadcastOpen = false;
-    }
-
-    private void SelectProvider(string provider)
-    {
-        if (selectedProvider == provider) return;
-        stagedKeys[selectedProvider] = editedKey;
-        stagedModels[selectedProvider] = editedModel;
-        selectedProvider = provider;
-        editedKey = stagedKeys[provider];
-        editedModel = stagedModels[provider];
-        revealKey = false;
-        status = "";
     }
 
     private void SaveSettings()
@@ -181,12 +174,13 @@ internal sealed partial class TalkWindow
         if (string.IsNullOrEmpty(stagedModels[Plugin.OpenAi]) ||
             string.IsNullOrEmpty(stagedModels[Plugin.Gemini]))
         {
-            status = "Укажи модель для каждого провайдера.";
+            status = UiText.Get(SettingsLanguage, "models.error");
             return;
         }
         foreach (string provider in new[] { Plugin.OpenAi, Plugin.Gemini })
         {
-            if (!plugin.Keys.Save(provider, stagedKeys[provider], out string error))
+            if (!plugin.Keys.Save(provider, stagedKeys[provider], SettingsLanguage,
+                out string error))
             {
                 status = error;
                 return;
@@ -195,8 +189,10 @@ internal sealed partial class TalkWindow
         plugin.SetProvider(selectedProvider);
         plugin.OpenAiModel.Value = stagedModels[Plugin.OpenAi];
         plugin.GeminiModel.Value = stagedModels[Plugin.Gemini];
+        plugin.RefreshModelSelector();
         plugin.SaveConfiguration();
-        status = "Сохранено на этом компьютере.";
+        status = UiText.Get(plugin.UiLanguage, "saved");
+        native.RefreshInputLanguage();
     }
 
     private void SendMessage(string message)
@@ -208,7 +204,7 @@ internal sealed partial class TalkWindow
         if (string.IsNullOrEmpty(key))
         {
             native.BeginThinking(message);
-            native.ShowError("Сначала добавь ключ API в настройках (F8).");
+            native.ShowError(UiText.Get(plugin.UiLanguage, "key.required"));
             return;
         }
         plugin.Memory.AddTurn(follower, true, message);
@@ -218,18 +214,21 @@ internal sealed partial class TalkWindow
         native.BeginThinking(message);
         string model = plugin.Provider.Value == Plugin.Gemini
             ? plugin.GeminiModel.Value : plugin.OpenAiModel.Value;
-        ActionCatalog actions = FollowerActions.Inspect(follower, heldInteraction);
-        string followerState = FollowerContext.Capture(follower) + " " +
-            plugin.Requests.Context(follower) + " " + plugin.Memory.Context(follower);
+        string language = plugin.ContextLanguage(message);
+        ActionCatalog actions = FollowerActions.Inspect(follower, heldInteraction, language);
+        string followerState = FollowerContext.Capture(follower, language, observedActivity) + " " +
+            plugin.Requests.Context(follower, language) + " " +
+            plugin.Memory.Context(follower, language);
         plugin.RunConversation(ConversationApi.Generate(plugin.Provider.Value, model, key,
-            follower.Brain.Info.Name, followerState, actions, new List<ConversationTurn>(history), null,
+            language, follower.Brain.Info.Name, followerState, actions,
+            new List<ConversationTurn>(history), null,
             decision =>
             {
                 if (requestSession != session || !talkOpen) return;
                 if (decision.Action == "cancel")
                 {
                     waiting = false;
-                    pendingAction = null;
+                    pendingAction = follower.Brain.FollowingPlayer ? "stop_follow" : null;
                     plugin.LogAction("cancel", true, false);
                     AddReply(follower, decision);
                     return;
@@ -239,10 +238,11 @@ internal sealed partial class TalkWindow
                 {
                     pendingAction = null;
                     plugin.LogAction(decision.Action, false, false);
-                    string correction = FollowerActions.UnavailableReason(follower, decision.Action) +
-                        " Предыдущий вариант ответа: " + decision.Reply;
+                    string correction = FollowerActions.UnavailableReason(follower,
+                        decision.Action, language) + TalkLanguage.Pick(language,
+                        " Предыдущий вариант ответа: ", " Previous draft: ") + decision.Reply;
                     plugin.RunConversation(ConversationApi.Generate(plugin.Provider.Value, model, key,
-                        follower.Brain.Info.Name, followerState, actions,
+                        language, follower.Brain.Info.Name, followerState, actions,
                         new List<ConversationTurn>(history), correction,
                         revised =>
                         {
@@ -279,11 +279,16 @@ internal sealed partial class TalkWindow
         plugin.Faith.FromConversation(follower, decision.FaithEffect);
         plugin.Requests.ObserveReply(follower, decision);
         string source = plugin.Memory.History(follower).FindLast(turn => turn.Player).Text ?? "";
+        string language = plugin.ContextLanguage(source);
         plugin.Memory.Remember(follower, decision.MemoryNote,
-            "Игрок: " + source + " | Последователь: " + decision.Reply);
+            TalkLanguage.Pick(language, "Игрок: ", "Player: ") + source +
+            TalkLanguage.Pick(language, " | Последователь: ", " | Follower: ") + decision.Reply);
         plugin.Memory.AddTurn(follower, false, decision.Reply);
-        native.ShowReply(decision.Reply, pendingAction == "gift" || pendingAction == "bless" ||
-            pendingAction == "tithe" ||
+        FollowerEmotion.RememberDayMood(follower, decision.Emotion, plugin.Memory);
+        native.ShowReply(decision.Reply, pendingAction == "gift" || pendingAction == "pet" ||
+            pendingAction == "follow" || pendingAction == "stop_follow" ||
+            pendingAction == "bless" ||
+            pendingAction == "tithe" || pendingAction == "inspire" || pendingAction == "drink" ||
             (decision.EndConversation && pendingAction != null), decision.Emotion);
     }
 
@@ -297,7 +302,9 @@ internal sealed partial class TalkWindow
     {
         if (follower == null || follower.Brain == null) return;
         OpenTalk(follower, null);
-        string eventText = "Я подарил тебе: " + giftName;
+        string language = plugin.UiLanguage;
+        string eventText = TalkLanguage.Pick(language,
+            "Я подарил тебе: ", "I gave you: ") + giftName;
         plugin.Memory.AddTurn(follower, true, eventText);
         List<ConversationTurn> history = plugin.Memory.History(follower);
         int requestSession = session;
@@ -306,17 +313,22 @@ internal sealed partial class TalkWindow
         string model = plugin.Provider.Value == Plugin.Gemini
             ? plugin.GeminiModel.Value : plugin.OpenAiModel.Value;
         plugin.RunConversation(ConversationApi.Generate(plugin.Provider.Value, model,
-            plugin.Keys.Get(plugin.Provider.Value), follower.Brain.Info.Name,
-            FollowerContext.Capture(follower) + " " + plugin.Requests.Context(follower) +
-                " " + plugin.Memory.Context(follower),
-            FollowerActions.Inspect(follower, null), new List<ConversationTurn>(history), null,
+            plugin.Keys.Get(plugin.Provider.Value), language, follower.Brain.Info.Name,
+            FollowerContext.Capture(follower, language, observedActivity) + " " +
+                plugin.Requests.Context(follower, language) + " " +
+                plugin.Memory.Context(follower, language),
+            FollowerActions.Inspect(follower, null, language),
+            new List<ConversationTurn>(history), null,
             decision =>
             {
                 if (requestSession != session || !talkOpen) return;
                 waiting = false;
                 plugin.Memory.Remember(follower, decision.MemoryNote,
-                    "Игрок: " + eventText + " | Последователь: " + decision.Reply);
+                    TalkLanguage.Pick(language, "Игрок: ", "Player: ") + eventText +
+                    TalkLanguage.Pick(language, " | Последователь: ", " | Follower: ") +
+                    decision.Reply);
                 plugin.Memory.AddTurn(follower, false, decision.Reply);
+                FollowerEmotion.RememberDayMood(follower, decision.Emotion, plugin.Memory);
                 native.ShowReply(decision.Reply, false, decision.Emotion);
             },
             error =>

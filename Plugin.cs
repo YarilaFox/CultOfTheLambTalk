@@ -1,3 +1,4 @@
+using System;
 using BepInEx;
 using BepInEx.Configuration;
 using COTL_API.CustomFollowerCommand;
@@ -8,14 +9,19 @@ using UnityEngine;
 
 namespace FollowerTalk;
 
-[BepInPlugin("arikm.cotl.followertalk", "Follower Talk", "0.4.1")]
+[BepInPlugin("arikm.cotl.followertalk", "Follower Talk", "0.5.0")]
 [BepInDependency("io.github.xhayper.COTL_API")]
 public sealed class Plugin : BaseUnityPlugin
 {
     private Toggle? keyEditorToggle;
     private HorizontalSelector? providerSelector;
+    private HorizontalSelector? openAiModelSelector;
+    private HorizontalSelector? geminiModelSelector;
+    private HorizontalSelector? replyLanguageSelector;
+    private HorizontalSelector? uiLanguageSelector;
     private TalkWindow window = null!;
     private Harmony harmony = null!;
+    private string settingsLocale = "";
 
     internal const string OpenAi = "OpenAI API";
     internal const string Gemini = "Gemini API";
@@ -23,6 +29,25 @@ public sealed class Plugin : BaseUnityPlugin
     internal ConfigEntry<string> Provider { get; private set; } = null!;
     internal ConfigEntry<string> OpenAiModel { get; private set; } = null!;
     internal ConfigEntry<string> GeminiModel { get; private set; } = null!;
+    internal ConfigEntry<string> LanguageMode { get; private set; } = null!;
+    internal ConfigEntry<string> UiLanguageMode { get; private set; } = null!;
+    internal string GameLanguageCode
+    {
+        get
+        {
+            try
+            {
+                string code = I2.Loc.LocalizationManager.CurrentLanguageCode;
+                if (!string.IsNullOrEmpty(code)) return code;
+            }
+            catch (Exception) { }
+            return Application.systemLanguage.ToString();
+        }
+    }
+    internal string UiLanguage => UiText.Resolve(UiLanguageMode.Value, GameLanguageCode);
+    internal string ContextLanguage(string playerMessage) =>
+        TalkLanguage.Context(LanguageMode.Value, playerMessage,
+            UiLanguage == TalkLanguage.Russian ? TalkLanguage.Russian : TalkLanguage.English);
     internal KeyStore Keys { get; private set; } = null!;
     internal FollowerRequests Requests { get; private set; } = null!;
     internal FollowerFaith Faith { get; private set; } = null!;
@@ -35,7 +60,13 @@ public sealed class Plugin : BaseUnityPlugin
         Provider = Config.Bind("Conversation", "Provider", OpenAi, "Selected conversation API.");
         OpenAiModel = Config.Bind("Conversation", "OpenAIModel", "gpt-5.6-luna", "OpenAI model ID.");
         GeminiModel = Config.Bind("Conversation", "GeminiModel", "gemini-3.8-flash", "Gemini model ID.");
+        LanguageMode = Config.Bind("Conversation", "Language", TalkLanguage.Auto,
+            "Reply language: auto, ru, or en.");
+        UiLanguageMode = Config.Bind("Conversation", "InterfaceLanguage", UiText.Game,
+            "Interface language: game or a supported language code.");
         if (Provider.Value != OpenAi && Provider.Value != Gemini) Provider.Value = OpenAi;
+        if (!TalkLanguage.IsValid(LanguageMode.Value)) LanguageMode.Value = TalkLanguage.Auto;
+        if (!UiText.IsValidMode(UiLanguageMode.Value)) UiLanguageMode.Value = UiText.Game;
         Keys = new KeyStore();
         Requests = new FollowerRequests();
         Faith = new FollowerFaith();
@@ -53,38 +84,154 @@ public sealed class Plugin : BaseUnityPlugin
         harmony.Patch(AccessTools.Method(typeof(interaction_FollowerInteraction), "GiveItemRoutine"),
             postfix: new HarmonyMethod(typeof(Plugin), nameof(WrapGiftRoutine)));
 
-        providerSelector = CustomSettingsManager.AddHorizontalSelector("Разговоры", "Провайдер", Provider.Value,
+        providerSelector = CustomSettingsManager.AddHorizontalSelector("Conversations", "Provider", Provider.Value,
             new[] { OpenAi, Gemini }, index => Provider.Value = index == 1 ? Gemini : OpenAi);
-        keyEditorToggle = CustomSettingsManager.AddToggle("Разговоры", "Настроить ключ и модель", false,
+        openAiModelSelector = CustomSettingsManager.AddHorizontalSelector("Conversations", "OpenAI model",
+            OpenAiModel.Value, ModelChoices(OpenAi), index =>
+            {
+                string[] choices = ModelChoices(OpenAi);
+                if (index >= 0 && index < choices.Length) OpenAiModel.Value = choices[index];
+            });
+        geminiModelSelector = CustomSettingsManager.AddHorizontalSelector("Conversations", "Gemini model",
+            GeminiModel.Value, ModelChoices(Gemini), index =>
+            {
+                string[] choices = ModelChoices(Gemini);
+                if (index >= 0 && index < choices.Length) GeminiModel.Value = choices[index];
+            });
+        replyLanguageSelector = CustomSettingsManager.AddHorizontalSelector("Conversations", "Reply language",
+            ReplyLanguageNames()[Array.IndexOf(ReplyLanguageModes, LanguageMode.Value)],
+            ReplyLanguageNames(), index =>
+            {
+                if (index >= 0 && index < ReplyLanguageModes.Length)
+                    LanguageMode.Value = ReplyLanguageModes[index];
+            });
+        uiLanguageSelector = CustomSettingsManager.AddHorizontalSelector("Conversations", "Interface language",
+            UiLanguageNames()[Array.IndexOf(UiText.Languages, UiLanguageMode.Value)],
+            UiLanguageNames(), index =>
+            {
+                if (index >= 0 && index < UiText.Languages.Length)
+                {
+                    UiLanguageMode.Value = UiText.Languages[index];
+                    RefreshSettingsLanguage();
+                }
+            });
+        keyEditorToggle = CustomSettingsManager.AddToggle("Conversations", "Settings", false,
             enabled =>
             {
                 if (!enabled) return;
                 if (keyEditorToggle != null) keyEditorToggle.Value = false;
                 window.OpenSettings();
             });
+        RefreshSettingsLanguage();
         CustomFollowerCommandManager.Add(new TalkCommand());
         Logger.LogInfo("Follower conversation command registered.");
     }
 
     private void Update()
     {
+        RefreshSettingsLanguage();
         window.HandleUpdate();
+        FollowerEmotion.UpdateDayMoods(Memory);
         Requests.Update();
+    }
+
+    private void LateUpdate() => NativeSettingsLabels.Refresh(UiLanguage);
+
+    internal void RefreshSettingsLanguage()
+    {
+        string language = UiLanguage;
+        if (settingsLocale == language) return;
+        settingsLocale = language;
+        string category = UiText.Get(language, "settings.category");
+        if (providerSelector != null)
+        {
+            providerSelector.Category = category;
+            providerSelector.Text = UiText.Get(language, "provider");
+        }
+        if (openAiModelSelector != null)
+        {
+            openAiModelSelector.Category = category;
+            openAiModelSelector.Text = UiText.Get(language, "model") + " - OpenAI";
+        }
+        if (geminiModelSelector != null)
+        {
+            geminiModelSelector.Category = category;
+            geminiModelSelector.Text = UiText.Get(language, "model") + " - Gemini";
+        }
+        if (replyLanguageSelector != null)
+        {
+            replyLanguageSelector.Category = category;
+            replyLanguageSelector.Text = UiText.Get(language, "reply.language");
+            replyLanguageSelector.Options = ReplyLanguageNames();
+            replyLanguageSelector.Value = replyLanguageSelector.Options[
+                Array.IndexOf(ReplyLanguageModes, LanguageMode.Value)];
+        }
+        if (uiLanguageSelector != null)
+        {
+            uiLanguageSelector.Category = category;
+            uiLanguageSelector.Text = UiText.Get(language, "ui.language");
+            uiLanguageSelector.Options = UiLanguageNames();
+            uiLanguageSelector.Value = uiLanguageSelector.Options[
+                Array.IndexOf(UiText.Languages, UiLanguageMode.Value)];
+        }
+        if (keyEditorToggle != null)
+        {
+            keyEditorToggle.Category = category;
+            keyEditorToggle.Text = UiText.Get(language, "settings.open");
+        }
+    }
+
+    private static readonly string[] ReplyLanguageModes =
+        { TalkLanguage.Auto, TalkLanguage.Russian, TalkLanguage.English };
+
+    private string[] ReplyLanguageNames() =>
+        new[] { UiText.Get(UiLanguage, "auto"), "Русский", "English" };
+
+    private string[] UiLanguageNames()
+    {
+        string[] names = (string[])UiText.LanguageNames.Clone();
+        names[0] = UiText.Get(UiLanguage, "game.language");
+        return names;
+    }
+
+    private string[] ModelChoices(string provider)
+    {
+        string[] presets = provider == OpenAi
+            ? new[] { "gpt-5.6-luna", "gpt-6-luna" }
+            : new[] { "gemini-3.8-flash", "gemini-3.6-flash" };
+        string current = provider == OpenAi ? OpenAiModel.Value : GeminiModel.Value;
+        return Array.IndexOf(presets, current) >= 0
+            ? presets : new[] { presets[0], presets[1], current };
+    }
+
+    internal void RefreshModelSelector()
+    {
+        if (openAiModelSelector != null)
+        {
+            openAiModelSelector.Options = ModelChoices(OpenAi);
+            openAiModelSelector.Value = OpenAiModel.Value;
+        }
+        if (geminiModelSelector != null)
+        {
+            geminiModelSelector.Options = ModelChoices(Gemini);
+            geminiModelSelector.Value = GeminiModel.Value;
+        }
     }
 
     private void OnGUI() => window.Draw();
 
     private void OnDestroy() => harmony?.UnpatchSelf();
 
-    internal void OpenTalk(Follower follower, interaction_FollowerInteraction? heldInteraction) =>
-        StartCoroutine(OpenTalkAfterWheel(follower, heldInteraction));
+    internal void OpenTalk(Follower follower, interaction_FollowerInteraction? heldInteraction,
+        FollowerActivity activity) =>
+        StartCoroutine(OpenTalkAfterWheel(follower, heldInteraction, activity));
 
     private System.Collections.IEnumerator OpenTalkAfterWheel(Follower follower,
-        interaction_FollowerInteraction? heldInteraction)
+        interaction_FollowerInteraction? heldInteraction, FollowerActivity activity)
     {
         yield return null;
         if (follower != null && follower.Brain != null)
-            window.OpenTalk(follower, heldInteraction);
+            window.OpenTalk(follower, heldInteraction, activity);
         else if (heldInteraction != null)
         {
             try { TalkCommand.ReleaseFollower(heldInteraction); }
@@ -135,6 +282,9 @@ public sealed class Plugin : BaseUnityPlugin
     internal void LogActionError(string action, System.Exception error) =>
         Logger.LogWarning("Conversation action failed: " + action + " " + error);
 
+    internal void LogEmotion(string emotion, string face) =>
+        Logger.LogInfo("Conversation emotion: " + emotion + " -> " + face);
+
     internal void LogFaith(string follower, float before, float after) =>
         Logger.LogInfo("Personal faith: " + follower + " " + before + " -> " + after);
 
@@ -143,6 +293,12 @@ public sealed class Plugin : BaseUnityPlugin
 
     internal void LogMemoryError(System.Exception error) =>
         Logger.LogWarning("Follower memory failed: " + error);
+
+    internal void LogApiFailure(string provider, string model, long status,
+        string detail, string transportError) =>
+        Logger.LogWarning("Conversation API failed: provider=" + provider +
+            "; model=" + model + "; status=" + status +
+            "; detail=" + detail + "; transport=" + transportError);
 
     internal void LogAnnouncement(string message) =>
         Logger.LogInfo("Cult announcement saved (" + message.Length + " characters).");

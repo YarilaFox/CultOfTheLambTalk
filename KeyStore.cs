@@ -35,7 +35,7 @@ internal sealed class KeyStore
         catch { return ""; }
     }
 
-    public bool Save(string provider, string key, out string error)
+    public bool Save(string provider, string key, string language, out string error)
     {
         try
         {
@@ -52,7 +52,7 @@ internal sealed class KeyStore
         }
         catch
         {
-            error = "Не удалось безопасно сохранить ключ.";
+            error = UiText.Get(language, "key.error");
             return false;
         }
     }

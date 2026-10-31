@@ -10,7 +10,6 @@ namespace FollowerTalk;
 
 internal sealed class NativeDialogue
 {
-    private const string InputHint = "Напишите что-нибудь или выйдите на Esc.";
     private const float ConversationZoom = 8f;
     private static readonly MethodInfo? ShowNextLine = typeof(MMConversation).GetMethod(
         "ShowNextLine", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -22,16 +21,30 @@ internal sealed class NativeDialogue
     private ConversationObject? conversation;
     private Action<string>? submitted;
     private Action? closed;
-    private string draft = "";
+    private readonly DialogueDraft draft = new();
     private string visibleLine = "";
     private bool waiting;
     private bool replyVisible;
+    private bool replyEmotionShown;
+    private bool replyFinished;
+    private string replyEmotion = "neutral";
     private bool closeAfterReply;
     private bool settingsVisible;
     private bool closing;
     private int currentEntryIndex;
 
     public NativeDialogue(Plugin plugin) => this.plugin = plugin;
+    private string InputHint => UiText.Get(plugin.UiLanguage, "input.hint");
+    private string PlayerName => UiText.Get(plugin.UiLanguage, "speaker.you");
+
+    public static bool IsTalkingTo(Follower follower) =>
+        active != null && active.follower == follower && active.IsCurrent();
+
+    public void RefreshInputLanguage()
+    {
+        if (IsCurrent() && !waiting && !replyVisible && draft.Text.Length == 0)
+            RenderDraft();
+    }
 
     public static bool AllowAdvance()
     {
@@ -67,45 +80,64 @@ internal sealed class NativeDialogue
 
     public void HandleUpdate()
     {
-        if (!IsCurrent() || waiting || replyVisible || settingsVisible) return;
+        if (!IsCurrent() || settingsVisible) return;
+        if (replyVisible)
+        {
+            if (!waiting && !replyFinished &&
+                MMConversation.mmConversation.TextPlayer.textAnimator.allLettersShown)
+            {
+                replyFinished = true;
+                FollowerEmotion.StopSpeakingMouth(follower);
+                SetFollowerDialogueAnimation("idle");
+                if (!replyEmotionShown) FollowerEmotion.Apply(follower, replyEmotion);
+            }
+            return;
+        }
+        if (waiting) return;
         var text = MMConversation.mmConversation.TextPlayer.GetComponent<TextMeshProUGUI>();
         if (text.text != visibleLine) SetVisibleLine(visibleLine, true);
         if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
         {
-            string message = draft.Trim();
+            string message = draft.Text.Trim();
             if (message.Length > 0) submitted?.Invoke(message);
             return;
         }
 
         bool control = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
-        if (control && Input.GetKeyDown(KeyCode.V))
+        bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+        if (control && Input.GetKeyDown(KeyCode.A)) draft.SelectAll();
+        else if (control && Input.GetKeyDown(KeyCode.C))
+            GUIUtility.systemCopyBuffer = draft.SelectedText();
+        else if (control && Input.GetKeyDown(KeyCode.X))
         {
-            Append(GUIUtility.systemCopyBuffer);
-            return;
-        }
-        string before = draft;
-        if (Input.GetKeyDown(KeyCode.Backspace) && draft.Length > 0)
-            draft = draft.Substring(0, draft.Length - 1);
-        if (!control)
-            foreach (char character in Input.inputString)
-                if (!char.IsControl(character) && draft.Length < 320) draft += character;
-        if (before != draft) RenderDraft();
-    }
-
-    private void Append(string value)
-    {
-        foreach (char character in value)
-            if (character == '\r' || character == '\n')
+            if (draft.HasSelection)
             {
-                if (draft.Length < 320) draft += ' ';
+                GUIUtility.systemCopyBuffer = draft.SelectedText();
+                draft.DeleteForward();
             }
-            else if (!char.IsControl(character) && draft.Length < 320) draft += character;
+        }
+        else if (control && Input.GetKeyDown(KeyCode.V)) draft.Insert(GUIUtility.systemCopyBuffer);
+        else if (Input.GetKeyDown(KeyCode.LeftArrow)) draft.MoveLeft(shift);
+        else if (Input.GetKeyDown(KeyCode.RightArrow)) draft.MoveRight(shift);
+        else if (Input.GetKeyDown(KeyCode.Home)) draft.Move(0, shift);
+        else if (Input.GetKeyDown(KeyCode.End)) draft.Move(draft.Text.Length, shift);
+        else if (Input.GetKeyDown(KeyCode.Backspace)) draft.DeleteBack();
+        else if (Input.GetKeyDown(KeyCode.Delete)) draft.DeleteForward();
+        else if (!control)
+        {
+            string typed = Input.inputString;
+            foreach (char character in typed)
+                if (!char.IsControl(character)) draft.Insert(character.ToString());
+            if (Input.GetKeyDown(KeyCode.Space) && !typed.Contains(" ")) draft.Insert(" ");
+        }
         RenderDraft();
     }
 
-    private void RenderDraft() => SetVisibleLine(draft.Length == 0
-        ? InputHint
-        : draft + "▌", true);
+    private void RenderDraft()
+    {
+        string display = draft.Display(InputHint);
+        if (display != visibleLine) SetVisibleLine(display, true);
+    }
 
     public void Open(Follower target, Action<string> onSubmit, Action onClose)
     {
@@ -114,15 +146,18 @@ internal sealed class NativeDialogue
         closed = onClose;
         waiting = false;
         replyVisible = false;
+        replyEmotionShown = false;
+        replyFinished = false;
+        replyEmotion = "neutral";
         closeAfterReply = false;
         closing = false;
         currentEntryIndex = 0;
-        draft = "";
-        visibleLine = InputHint;
+        draft.Clear();
+        visibleLine = draft.Display(InputHint);
         active = this;
 
         var playerEntry = new ConversationEntry(PlayerFarming.Instance.gameObject,
-            InputHint, "", "", null, "Вы")
+            InputHint, "", "", null, PlayerName)
         {
             SpeakerIsPlayer = true, SetZoom = true, Zoom = ConversationZoom
         };
@@ -155,8 +190,20 @@ internal sealed class NativeDialogue
         if (!replyVisible) SwitchToFollower();
         waiting = false;
         closeAfterReply = endConversation;
+        replyEmotion = emotion;
+        replyEmotionShown = false;
+        replyFinished = false;
+        bool mouthOverlay = FollowerEmotion.StartSpeakingMouth(follower);
+        if (mouthOverlay)
+        {
+            if (emotion != "neutral")
+            {
+                FollowerEmotion.Apply(follower, emotion);
+                replyEmotionShown = true;
+            }
+        }
+        else SetFollowerDialogueAnimation("talk");
         SetVisibleLine(text, false);
-        FollowerEmotion.Apply(follower, emotion);
         MMConversation.mmConversation.NextArrowContainer.SetActive(true);
     }
 
@@ -164,8 +211,9 @@ internal sealed class NativeDialogue
     {
         ShowReply(text, false);
         if (!IsCurrent() || conversation == null) return;
-        conversation.Entries[currentEntryIndex].CharacterName = "Связь";
-        MMConversation.mmConversation.TitleText.text = "Связь";
+        string title = UiText.Get(plugin.UiLanguage, "connection");
+        conversation.Entries[currentEntryIndex].CharacterName = title;
+        MMConversation.mmConversation.TitleText.text = title;
     }
 
     public void Close()
@@ -191,7 +239,7 @@ internal sealed class NativeDialogue
         visibleLine = "...";
         currentEntryIndex = conversation.Entries.Count;
         conversation.Entries.Add(new ConversationEntry(follower.gameObject,
-            "...", "talk", "", null, follower.Brain.Info.Name)
+            "...", "idle", "", null, follower.Brain.Info.Name)
         {
             SetZoom = true, Zoom = ConversationZoom
         });
@@ -205,14 +253,17 @@ internal sealed class NativeDialogue
     {
         if (!IsCurrent() || conversation == null) return;
         FollowerEmotion.Restore(follower);
-        draft = "";
+        draft.Clear();
         waiting = false;
         replyVisible = false;
+        replyEmotionShown = false;
+        replyFinished = false;
+        replyEmotion = "neutral";
         closeAfterReply = false;
-        visibleLine = InputHint;
+        visibleLine = draft.Display(InputHint);
         currentEntryIndex = conversation.Entries.Count;
         var playerEntry = new ConversationEntry(PlayerFarming.Instance.gameObject,
-            InputHint, "", "", null, "Вы") { SpeakerIsPlayer = true,
+            InputHint, "", "", null, PlayerName) { SpeakerIsPlayer = true,
                 SetZoom = true, Zoom = ConversationZoom };
         conversation.Entries.Add(playerEntry);
         MMConversation.Position = currentEntryIndex - 1;
@@ -236,6 +287,17 @@ internal sealed class NativeDialogue
             MMConversation.mmConversation.TextPlayer.GetComponent<TextMeshProUGUI>().text = text;
         }
         else MMConversation.mmConversation.TextPlayer.ShowText(text);
+    }
+
+    private void SetFollowerDialogueAnimation(string animation)
+    {
+        try
+        {
+            var state = follower?.Spine?.AnimationState;
+            if (state != null && state.Data.SkeletonData.FindAnimation(animation) != null)
+                state.SetAnimation(1, animation, true);
+        }
+        catch (Exception error) { plugin.LogActionError("dialogue animation", error); }
     }
 
     private bool IsCurrent() => conversation != null &&

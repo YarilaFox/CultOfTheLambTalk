@@ -1,0 +1,181 @@
+{
+  "keys": [
+    "settings.category", "settings.open", "talk.title", "talk.description",
+    "input.hint", "speaker.you", "connection", "altar.button", "altar.title",
+    "close", "speak", "settings.title", "provider", "api.key", "key.hide",
+    "key.show", "model", "model.hint", "reply.language", "auto", "save",
+    "ui.language", "game.language", "broadcast.error", "models.error", "saved",
+    "key.error", "key.required", "message.error", "api.error", "api.details.empty",
+    "response.empty", "response.invalid", "response.read"
+  ],
+  "locales": {
+    "en": [
+      "Conversations", "Settings", "Talk", "Write to this follower.",
+      "Write something or press Esc to leave.", "You", "Connection", "Address everyone",
+      "Address the cult", "Close", "Speak", "Conversation settings", "Provider",
+      "API key", "Hide key", "Show key", "Model", "You can enter a different model ID.",
+      "Reply language", "Auto", "Save", "Interface language", "Game language",
+      "Could not save this message for the current save.", "Select a model for each provider.",
+      "Saved on this computer.", "Could not save the key securely.",
+      "Add an API key in settings first (F8).", "Could not prepare your message. Send it again.",
+      "API error (HTTP ", "No details from the server.", "The model returned no answer.",
+      "The model returned an invalid decision.", "Could not read the model response."
+    ],
+    "ru": [
+      "Разговоры", "Настройки", "Поговорить", "Написать последователю.",
+      "Напишите что-нибудь или выйдите на Esc.", "Вы", "Связь", "Сказать всем",
+      "Сказать всему культу", "Закрыть", "Сказать", "Настройки разговоров", "Провайдер",
+      "Ключ API", "Скрыть ключ", "Показать ключ", "Модель", "Можно вписать ID другой модели.",
+      "Язык ответов", "Авто", "Сохранить", "Язык интерфейса", "Язык игры",
+      "Не удалось сохранить слова для этого сейва.", "Укажи модель для каждого провайдера.",
+      "Сохранено на этом компьютере.", "Не удалось безопасно сохранить ключ.",
+      "Сначала добавь ключ API в настройках (F8).", "Не удалось подготовить сообщение. Отправь его снова.",
+      "Ошибка API (HTTP ", "Нет подробностей от сервера.", "Модель не вернула ответ.",
+      "Модель вернула некорректное решение.", "Не удалось прочитать ответ модели."
+    ],
+    "fr": [
+      "Conversations", "Paramètres", "Parler", "Écrire à cet adepte.",
+      "Écrivez quelque chose ou appuyez sur Échap pour quitter.", "Vous", "Connexion", "S'adresser à tous",
+      "S'adresser au culte", "Fermer", "Parler", "Paramètres des conversations", "Fournisseur",
+      "Clé API", "Masquer la clé", "Afficher la clé", "Modèle", "Vous pouvez saisir un autre ID de modèle.",
+      "Langue des réponses", "Auto", "Enregistrer", "Langue de l'interface", "Langue du jeu",
+      "Impossible d'enregistrer ce message pour cette sauvegarde.", "Choisissez un modèle pour chaque fournisseur.",
+      "Enregistré sur cet ordinateur.", "Impossible d'enregistrer la clé en toute sécurité.",
+      "Ajoutez d'abord une clé API dans les paramètres (F8).", "Impossible de préparer votre message. Renvoyez-le.",
+      "Erreur API (HTTP ", "Aucun détail fourni par le serveur.", "Le modèle n'a pas répondu.",
+      "Le modèle a renvoyé une décision invalide.", "Impossible de lire la réponse du modèle."
+    ],
+    "de": [
+      "Gespräche", "Einstellungen", "Reden", "Diesem Anhänger schreiben.",
+      "Schreib etwas oder drücke Esc zum Beenden.", "Du", "Verbindung", "Alle ansprechen",
+      "Den Kult ansprechen", "Schließen", "Sprechen", "Gesprächseinstellungen", "Anbieter",
+      "API-Schlüssel", "Schlüssel verbergen", "Schlüssel anzeigen", "Modell", "Du kannst eine andere Modell-ID eingeben.",
+      "Antwortsprache", "Auto", "Speichern", "Sprache der Oberfläche", "Spielsprache",
+      "Diese Nachricht konnte für den Spielstand nicht gespeichert werden.", "Wähle für jeden Anbieter ein Modell.",
+      "Auf diesem Computer gespeichert.", "Schlüssel konnte nicht sicher gespeichert werden.",
+      "Füge zuerst einen API-Schlüssel in den Einstellungen hinzu (F8).", "Nachricht konnte nicht vorbereitet werden. Sende sie erneut.",
+      "API-Fehler (HTTP ", "Keine Angaben vom Server.", "Das Modell hat nicht geantwortet.",
+      "Das Modell lieferte eine ungültige Entscheidung.", "Modellantwort konnte nicht gelesen werden."
+    ],
+    "es": [
+      "Conversaciones", "Ajustes", "Hablar", "Escribir a este adepto.",
+      "Escribe algo o pulsa Esc para salir.", "Tú", "Conexión", "Hablar a todos",
+      "Hablar al culto", "Cerrar", "Hablar", "Ajustes de conversación", "Proveedor",
+      "Clave API", "Ocultar clave", "Mostrar clave", "Modelo", "Puedes introducir otro ID de modelo.",
+      "Idioma de respuesta", "Auto", "Guardar", "Idioma de la interfaz", "Idioma del juego",
+      "No se pudo guardar este mensaje en la partida.", "Elige un modelo para cada proveedor.",
+      "Guardado en este equipo.", "No se pudo guardar la clave de forma segura.",
+      "Primero añade una clave API en ajustes (F8).", "No se pudo preparar el mensaje. Envíalo de nuevo.",
+      "Error de API (HTTP ", "El servidor no dio más detalles.", "El modelo no respondió.",
+      "El modelo devolvió una decisión no válida.", "No se pudo leer la respuesta del modelo."
+    ],
+    "pt-BR": [
+      "Conversas", "Configurações", "Conversar", "Escrever para este seguidor.",
+      "Escreva algo ou pressione Esc para sair.", "Você", "Conexão", "Falar com todos",
+      "Falar com o culto", "Fechar", "Falar", "Configurações de conversa", "Provedor",
+      "Chave de API", "Ocultar chave", "Mostrar chave", "Modelo", "Você pode inserir outro ID de modelo.",
+      "Idioma das respostas", "Automático", "Salvar", "Idioma da interface", "Idioma do jogo",
+      "Não foi possível salvar esta mensagem neste jogo.", "Escolha um modelo para cada provedor.",
+      "Salvo neste computador.", "Não foi possível salvar a chave com segurança.",
+      "Adicione uma chave de API nas configurações (F8).", "Não foi possível preparar a mensagem. Envie novamente.",
+      "Erro de API (HTTP ", "Sem detalhes do servidor.", "O modelo não respondeu.",
+      "O modelo retornou uma decisão inválida.", "Não foi possível ler a resposta do modelo."
+    ],
+    "it": [
+      "Conversazioni", "Impostazioni", "Parla", "Scrivi a questo seguace.",
+      "Scrivi qualcosa o premi Esc per uscire.", "Tu", "Connessione", "Parla a tutti",
+      "Parla al culto", "Chiudi", "Parla", "Impostazioni conversazione", "Provider",
+      "Chiave API", "Nascondi chiave", "Mostra chiave", "Modello", "Puoi inserire un altro ID modello.",
+      "Lingua delle risposte", "Auto", "Salva", "Lingua dell'interfaccia", "Lingua del gioco",
+      "Impossibile salvare il messaggio per questo salvataggio.", "Scegli un modello per ogni provider.",
+      "Salvato su questo computer.", "Impossibile salvare la chiave in modo sicuro.",
+      "Aggiungi prima una chiave API nelle impostazioni (F8).", "Impossibile preparare il messaggio. Invialo di nuovo.",
+      "Errore API (HTTP ", "Nessun dettaglio dal server.", "Il modello non ha risposto.",
+      "Il modello ha restituito una decisione non valida.", "Impossibile leggere la risposta del modello."
+    ],
+    "nl": [
+      "Gesprekken", "Instellingen", "Praten", "Schrijf naar deze volgeling.",
+      "Schrijf iets of druk op Esc om af te sluiten.", "Jij", "Verbinding", "Iedereen aanspreken",
+      "Spreek de sekte toe", "Sluiten", "Spreken", "Gespreksinstellingen", "Aanbieder",
+      "API-sleutel", "Sleutel verbergen", "Sleutel tonen", "Model", "Je kunt een andere model-ID invoeren.",
+      "Antwoordtaal", "Auto", "Opslaan", "Interfacetaal", "Speltaal",
+      "Dit bericht kon niet worden opgeslagen voor dit spelbestand.", "Kies een model voor elke aanbieder.",
+      "Op deze computer opgeslagen.", "De sleutel kon niet veilig worden opgeslagen.",
+      "Voeg eerst een API-sleutel toe in de instellingen (F8).", "Bericht kon niet worden voorbereid. Verstuur het opnieuw.",
+      "API-fout (HTTP ", "Geen details van de server.", "Het model gaf geen antwoord.",
+      "Het model gaf een ongeldig besluit terug.", "Kon het antwoord van het model niet lezen."
+    ],
+    "tr": [
+      "Konuşmalar", "Ayarlar", "Konuş", "Bu takipçiye yaz.",
+      "Bir şey yaz veya çıkmak için Esc tuşuna bas.", "Sen", "Bağlantı", "Herkese seslen",
+      "Tarikata seslen", "Kapat", "Konuş", "Konuşma ayarları", "Sağlayıcı",
+      "API anahtarı", "Anahtarı gizle", "Anahtarı göster", "Model", "Başka bir model kimliği girebilirsin.",
+      "Yanıt dili", "Otomatik", "Kaydet", "Arayüz dili", "Oyun dili",
+      "Bu mesaj bu kayıt için saklanamadı.", "Her sağlayıcı için bir model seç.",
+      "Bu bilgisayara kaydedildi.", "Anahtar güvenli biçimde kaydedilemedi.",
+      "Önce ayarlardan bir API anahtarı ekle (F8).", "Mesaj hazırlanamadı. Yeniden gönder.",
+      "API hatası (HTTP ", "Sunucudan ayrıntı gelmedi.", "Model yanıt vermedi.",
+      "Model geçersiz bir karar döndürdü.", "Model yanıtı okunamadı."
+    ],
+    "ja": [
+      "会話", "設定", "話す", "この信者に話しかける。",
+      "何か入力するか Esc で終了。", "あなた", "接続", "全員に話す",
+      "教団に話す", "閉じる", "話す", "会話の設定", "プロバイダー",
+      "APIキー", "キーを隠す", "キーを表示", "モデル", "別のモデルIDも入力できます。",
+      "返答の言語", "自動", "保存", "画面の言語", "ゲームの言語",
+      "このセーブにメッセージを保存できませんでした。", "各プロバイダーのモデルを選んでください。",
+      "このPCに保存しました。", "キーを安全に保存できませんでした。",
+      "まず設定でAPIキーを追加してください (F8)。", "メッセージを準備できませんでした。もう一度送信してください。",
+      "APIエラー (HTTP ", "サーバーから詳細がありません。", "モデルから返答がありません。",
+      "モデルが無効な判断を返しました。", "モデルの返答を読み取れませんでした。"
+    ],
+    "ko": [
+      "대화", "설정", "대화하기", "이 추종자에게 말을 걸기.",
+      "무언가 입력하거나 Esc를 눌러 나가세요.", "당신", "연결", "모두에게 말하기",
+      "교단에 말하기", "닫기", "말하기", "대화 설정", "제공자",
+      "API 키", "키 숨기기", "키 표시", "모델", "다른 모델 ID를 입력할 수 있습니다.",
+      "응답 언어", "자동", "저장", "인터페이스 언어", "게임 언어",
+      "이 저장 파일에 메시지를 저장하지 못했습니다.", "각 제공자의 모델을 선택하세요.",
+      "이 컴퓨터에 저장했습니다.", "키를 안전하게 저장하지 못했습니다.",
+      "먼저 설정에서 API 키를 추가하세요 (F8).", "메시지를 준비하지 못했습니다. 다시 보내세요.",
+      "API 오류 (HTTP ", "서버에서 자세한 정보를 보내지 않았습니다.", "모델이 답하지 않았습니다.",
+      "모델이 잘못된 결정을 반환했습니다.", "모델 응답을 읽지 못했습니다."
+    ],
+    "zh-Hans": [
+      "对话", "设置", "交谈", "与这位教徒交谈。",
+      "输入内容，或按 Esc 退出。", "你", "连接", "对所有人说话",
+      "向教团讲话", "关闭", "说话", "对话设置", "服务商",
+      "API 密钥", "隐藏密钥", "显示密钥", "模型", "也可以输入其他模型 ID。",
+      "回复语言", "自动", "保存", "界面语言", "游戏语言",
+      "无法将此消息保存到当前存档。", "请为每个服务商选择模型。",
+      "已保存在这台电脑上。", "无法安全保存密钥。",
+      "请先在设置中添加 API 密钥 (F8)。", "无法准备消息，请重新发送。",
+      "API 错误 (HTTP ", "服务器未提供详情。", "模型没有回复。",
+      "模型返回了无效的决定。", "无法读取模型回复。"
+    ],
+    "zh-Hant": [
+      "對話", "設定", "交談", "與這位教徒交談。",
+      "輸入內容，或按 Esc 離開。", "你", "連線", "對所有人說話",
+      "向教團講話", "關閉", "說話", "對話設定", "服務商",
+      "API 金鑰", "隱藏金鑰", "顯示金鑰", "模型", "也可以輸入其他模型 ID。",
+      "回覆語言", "自動", "儲存", "介面語言", "遊戲語言",
+      "無法將此訊息儲存到目前存檔。", "請為每個服務商選擇模型。",
+      "已儲存在這台電腦上。", "無法安全儲存金鑰。",
+      "請先在設定中新增 API 金鑰 (F8)。", "無法準備訊息，請重新傳送。",
+      "API 錯誤 (HTTP ", "伺服器未提供詳情。", "模型沒有回覆。",
+      "模型傳回了無效的決定。", "無法讀取模型回覆。"
+    ],
+    "ar": [
+      "المحادثات", "الإعدادات", "تحدث", "تحدث إلى هذا التابع.",
+      "اكتب شيئًا أو اضغط Esc للخروج.", "أنت", "الاتصال", "تحدث إلى الجميع",
+      "تحدث إلى الطائفة", "إغلاق", "تحدث", "إعدادات المحادثة", "المزوّد",
+      "مفتاح API", "إخفاء المفتاح", "إظهار المفتاح", "النموذج", "يمكنك إدخال معرّف نموذج آخر.",
+      "لغة الردود", "تلقائي", "حفظ", "لغة الواجهة", "لغة اللعبة",
+      "تعذّر حفظ هذه الرسالة في ملف الحفظ الحالي.", "اختر نموذجًا لكل مزوّد.",
+      "تم الحفظ على هذا الكمبيوتر.", "تعذّر حفظ المفتاح بأمان.",
+      "أضف مفتاح API في الإعدادات أولًا (F8).", "تعذّر تجهيز الرسالة. أرسلها مجددًا.",
+      "خطأ API (HTTP ", "لا توجد تفاصيل من الخادم.", "لم يُرجع النموذج ردًا.",
+      "أرجع النموذج قرارًا غير صالح.", "تعذّرت قراءة رد النموذج."
+    ]
+  }
+}
