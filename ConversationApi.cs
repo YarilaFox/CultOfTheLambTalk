@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Text;
 using Newtonsoft.Json.Linq;
+using UnityEngine;
 using UnityEngine.Networking;
 
 namespace FollowerTalk;
@@ -250,7 +251,7 @@ internal static class ConversationApi
                 ["contents"] = contents,
                 ["generationConfig"] = new JObject
                 {
-                    ["maxOutputTokens"] = 512,
+                    ["maxOutputTokens"] = 1024,
                     ["responseFormat"] = new JObject
                     {
                         ["text"] = new JObject
@@ -324,53 +325,73 @@ internal static class ConversationApi
                     ["stream"] = false };
         }
 
-        using var request = new UnityWebRequest(url, "POST")
+        string responseText = "";
+        for (int attempt = 0; attempt < 2; attempt++)
         {
-            uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(payload.ToString())),
-            downloadHandler = new DownloadHandlerBuffer(),
-            timeout = provider == Plugin.OpenClaw || provider == Plugin.Hermes ? 90 : 40
-        };
-        request.SetRequestHeader("Content-Type", "application/json");
-        if (provider == Plugin.Gemini) request.SetRequestHeader("x-goog-api-key", key);
-        else if (provider == Plugin.Claude)
-        {
-            request.SetRequestHeader("x-api-key", key);
-            request.SetRequestHeader("anthropic-version", "2023-06-01");
-        }
-        else if (!string.IsNullOrEmpty(key))
-            request.SetRequestHeader("Authorization", "Bearer " + key);
-        yield return request.SendWebRequest();
-
-        if (request.result != UnityWebRequest.Result.Success)
-        {
-            string detail = "";
-            try
+            using (var request = new UnityWebRequest(url, "POST")
             {
-                JObject response = JObject.Parse(request.downloadHandler.text);
-                detail = response["error"]?["message"]?.Value<string>() ?? "";
+                uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(payload.ToString())),
+                downloadHandler = new DownloadHandlerBuffer(),
+                timeout = provider == Plugin.OpenClaw || provider == Plugin.Hermes ? 90 : 40
+            })
+            {
+                request.SetRequestHeader("Content-Type", "application/json");
+                if (provider == Plugin.Gemini) request.SetRequestHeader("x-goog-api-key", key);
+                else if (provider == Plugin.Claude)
+                {
+                    request.SetRequestHeader("x-api-key", key);
+                    request.SetRequestHeader("anthropic-version", "2023-06-01");
+                }
+                else if (!string.IsNullOrEmpty(key))
+                    request.SetRequestHeader("Authorization", "Bearer " + key);
+                yield return request.SendWebRequest();
+
+                if (request.result == UnityWebRequest.Result.Success)
+                {
+                    responseText = request.downloadHandler.text;
+                    break;
+                }
+
+                string detail = "";
+                try
+                {
+                    JObject response = JObject.Parse(request.downloadHandler.text);
+                    detail = response["error"]?["message"]?.Value<string>() ?? "";
+                }
+                catch { }
+                if (!string.IsNullOrEmpty(key)) detail = detail.Replace(key, "[redacted]");
+                detail = detail.Replace('\r', ' ').Replace('\n', ' ').Trim();
+                if (detail.Length > 240) detail = detail.Substring(0, 240) + "...";
+                Plugin.Instance.LogApiFailure(provider, model, request.responseCode, detail,
+                    request.error ?? "");
+                bool transient = request.responseCode == 0 || request.responseCode == 408 ||
+                    request.responseCode == 500 || request.responseCode == 502 ||
+                    request.responseCode == 503 || request.responseCode == 504;
+                if (!transient || attempt == 1)
+                {
+                    failure(UiText.Get(Plugin.Instance.UiLanguage, "api.error") +
+                        request.responseCode + "). " +
+                        (detail.Length > 0 ? detail : request.error ??
+                            UiText.Get(Plugin.Instance.UiLanguage, "api.details.empty")));
+                    yield break;
+                }
             }
-            catch { }
-            if (!string.IsNullOrEmpty(key)) detail = detail.Replace(key, "[redacted]");
-            detail = detail.Replace('\r', ' ').Replace('\n', ' ').Trim();
-            if (detail.Length > 240) detail = detail.Substring(0, 240) + "...";
-            Plugin.Instance.LogApiFailure(provider, model, request.responseCode, detail,
-                request.error ?? "");
-            failure(UiText.Get(Plugin.Instance.UiLanguage, "api.error") +
-                request.responseCode + "). " +
-                (detail.Length > 0 ? detail : request.error ??
-                    UiText.Get(Plugin.Instance.UiLanguage, "api.details.empty")));
-            yield break;
+            yield return new WaitForSecondsRealtime(2f);
         }
 
         ConversationDecision decision;
+        JObject? envelope = null;
+        string text = "";
         try
         {
-            JObject json = JObject.Parse(request.downloadHandler.text);
-            string text = provider == Plugin.Gemini ? ReadGemini(json) :
-                provider == Plugin.OpenAi ? ReadOpenAi(json) :
-                provider == Plugin.Claude ? ReadClaude(json) : ReadChat(json);
+            envelope = JObject.Parse(responseText);
+            text = provider == Plugin.Gemini ? ReadGemini(envelope) :
+                provider == Plugin.OpenAi ? ReadOpenAi(envelope) :
+                provider == Plugin.Claude ? ReadClaude(envelope) : ReadChat(envelope);
             if (string.IsNullOrWhiteSpace(text))
             {
+                Plugin.Instance.LogResponseParseFailure(provider, model, "empty",
+                    FinishReason(envelope), responseText.Length, 0);
                 failure(UiText.Get(Plugin.Instance.UiLanguage, "response.empty"));
                 yield break;
             }
@@ -396,8 +417,10 @@ internal static class ConversationApi
             decision = new ConversationDecision(reply, action, followUp,
                 endConversation.Value, faithEffect, emotion, memoryNote);
         }
-        catch
+        catch (Exception error)
         {
+            Plugin.Instance.LogResponseParseFailure(provider, model,
+                error.GetType().Name, FinishReason(envelope), responseText.Length, text.Length);
             failure(UiText.Get(Plugin.Instance.UiLanguage, "response.read"));
             yield break;
         }
@@ -406,13 +429,23 @@ internal static class ConversationApi
 
     private static string ReadGemini(JObject json)
     {
-        var parts = json["candidates"]?[0]?["content"]?["parts"] as JArray;
+        var candidates = json["candidates"] as JArray;
+        if (candidates == null || candidates.Count == 0) return "";
+        var parts = candidates[0]?["content"]?["parts"] as JArray;
         if (parts == null) return "";
         var result = new StringBuilder();
         foreach (JToken part in parts)
             if (part["thought"]?.Value<bool>() != true &&
                 part["text"]?.Value<string>() is string text) result.Append(text);
         return result.ToString();
+    }
+
+    private static string FinishReason(JObject? envelope)
+    {
+        var candidates = envelope?["candidates"] as JArray;
+        if (candidates == null || candidates.Count == 0)
+            return envelope?["promptFeedback"]?["blockReason"]?.Value<string>() ?? "none";
+        return candidates[0]?["finishReason"]?.Value<string>() ?? "none";
     }
 
     private static string ReadOpenAi(JObject json)

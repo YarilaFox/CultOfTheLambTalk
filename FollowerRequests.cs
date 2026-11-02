@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using BepInEx;
 using Newtonsoft.Json.Linq;
@@ -13,6 +14,9 @@ internal sealed class FollowerRequests
 {
     private readonly string path = Path.Combine(Paths.ConfigPath, "FollowerTalk.requests.json");
     private readonly JObject entries;
+    private readonly bool fileReadable = true;
+    private string saveId = "";
+    private string savePrefix = "";
     private float nextCheck;
 
     public FollowerRequests()
@@ -26,6 +30,7 @@ internal sealed class FollowerRequests
         {
             Plugin.Instance.LogRequestError(error);
             entries = new JObject();
+            fileReadable = false;
         }
     }
 
@@ -54,6 +59,7 @@ internal sealed class FollowerRequests
 
     public void ObserveReply(Follower follower, ConversationDecision decision)
     {
+        if (CurrentPrefix().Length == 0) return;
         JObject state = State(follower);
         bool changed = false;
         bool saidRequest = decision.Request == "build_lumberyard" ||
@@ -83,7 +89,8 @@ internal sealed class FollowerRequests
         nextCheck = Time.unscaledTime + 1f;
         if (PlayerFarming.Instance == null || PlayerFarming.Location != FollowerLocation.Base) return;
 
-        string prefix = SaveAndLoad.SAVE_SLOT + ":";
+        string prefix = CurrentPrefix();
+        if (prefix.Length == 0) return;
         bool changed = false;
         foreach (JProperty follower in entries.Properties().ToList())
         {
@@ -111,11 +118,27 @@ internal sealed class FollowerRequests
 
     private JObject State(Follower follower)
     {
-        string key = SaveAndLoad.SAVE_SLOT + ":" + follower.Brain.Info.ID;
+        string prefix = CurrentPrefix();
+        if (prefix.Length == 0) return new JObject { ["requests"] = new JObject() };
+        string key = prefix + follower.Brain.Info.ID;
         if (entries[key] is JObject state) return state;
         state = new JObject { ["requests"] = new JObject() };
         entries[key] = state;
         return state;
+    }
+
+    private string CurrentPrefix()
+    {
+        string id = DataManager.Instance?.SaveUniqueID ?? "";
+        if (id == saveId) return savePrefix;
+        saveId = id;
+        savePrefix = "";
+        if (string.IsNullOrWhiteSpace(id)) return savePrefix;
+        using SHA256 sha = SHA256.Create();
+        string hash = BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(id)))
+            .Replace("-", "").Substring(0, 20);
+        savePrefix = "save:" + hash + ":";
+        return savePrefix;
     }
 
     private static string RequestName(string request, string language) => request switch
@@ -148,6 +171,7 @@ internal sealed class FollowerRequests
 
     private void Save()
     {
+        if (!fileReadable) return;
         try
         {
             string temporary = path + ".tmp";

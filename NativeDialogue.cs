@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
+using FMOD.Studio;
 using MMTools;
 using TMPro;
 using UnityEngine;
@@ -13,6 +14,8 @@ internal sealed class NativeDialogue
     private const float ConversationZoom = 8f;
     private static readonly MethodInfo? ShowNextLine = typeof(MMConversation).GetMethod(
         "ShowNextLine", BindingFlags.Instance | BindingFlags.NonPublic);
+    private static readonly FieldInfo? TalkSoundInstance = typeof(MMConversation).GetField(
+        "talkSoundInstance", BindingFlags.Instance | BindingFlags.NonPublic);
     private static NativeDialogue? active;
     private static int suppressPauseThroughFrame = -1;
 
@@ -35,6 +38,10 @@ internal sealed class NativeDialogue
     private int currentEntryIndex;
     private float nextThinkingFrame;
     private int thinkingDots;
+    private Febucci.UI.TextAnimatorPlayer? subscribedTextPlayer;
+    private float lastVisibleCharacter;
+    private bool mouthSpeaking;
+    private bool mouthOverlay;
 
     public NativeDialogue(Plugin plugin) => this.plugin = plugin;
     private string InputHint => UiText.Get(plugin.UiLanguage, "input.hint");
@@ -90,20 +97,22 @@ internal sealed class NativeDialogue
     public void HandleUpdate()
     {
         if (!IsCurrent() || settingsVisible) return;
+        if (waiting && Time.unscaledTime >= nextThinkingFrame && !replyVisible)
+        {
+            thinkingDots = thinkingDots % 3 + 1;
+            SetVisibleLine(new string('.', thinkingDots), true);
+            nextThinkingFrame = Time.unscaledTime + .45f;
+        }
         if (replyVisible)
         {
-            if (waiting && follower != null && Time.unscaledTime >= nextThinkingFrame)
-            {
-                thinkingDots = thinkingDots % 3 + 1;
-                SetVisibleLine(new string('.', thinkingDots), true);
-                nextThinkingFrame = Time.unscaledTime + .45f;
-            }
+            if (mouthSpeaking && Time.unscaledTime - lastVisibleCharacter > .12f)
+                StopSpeaking();
             if (!waiting && !replyFinished &&
                 MMConversation.mmConversation.TextPlayer.textAnimator.allLettersShown)
             {
                 replyFinished = true;
-                FollowerEmotion.StopSpeakingMouth(follower);
-                SetFollowerDialogueAnimation("idle");
+                StopSpeaking();
+                StopFollowerVoice();
                 if (!replyEmotionShown) FollowerEmotion.Apply(follower, replyEmotion);
             }
             return;
@@ -189,6 +198,8 @@ internal sealed class NativeDialogue
         conversation = new ConversationObject(new List<ConversationEntry> { playerEntry }, null,
             OnConversationClosed, null);
         MMConversation.Play(conversation, true, true, true, true, true, false, false);
+        subscribedTextPlayer = MMConversation.mmConversation.TextPlayer;
+        subscribedTextPlayer.onCharacterVisible.AddListener(OnCharacterVisible);
         RenderDraft();
         plugin.RunConversation(RenderDraftAfterOpen());
         MMConversation.mmConversation.NextArrowContainer.SetActive(false);
@@ -208,7 +219,6 @@ internal sealed class NativeDialogue
         nextThinkingFrame = Time.unscaledTime;
         SetVisibleLine(playerMessage, true);
         MMConversation.mmConversation.NextArrowContainer.SetActive(false);
-        plugin.RunConversation(ShowThinkingAfterPause());
     }
 
     public void ShowAnnouncement(string message)
@@ -231,23 +241,20 @@ internal sealed class NativeDialogue
     public void ShowReply(string text, bool endConversation = false, string emotion = "neutral")
     {
         if (!IsCurrent()) return;
-        if (!replyVisible) SwitchToFollower();
+        bool newPage = !replyVisible;
         waiting = false;
         closeAfterReply = endConversation;
         replyEmotion = emotion;
         replyEmotionShown = false;
         replyFinished = false;
-        bool mouthOverlay = FollowerEmotion.StartSpeakingMouth(follower);
-        if (mouthOverlay)
+        StopSpeaking();
+        if (emotion != "neutral")
         {
-            if (emotion != "neutral")
-            {
-                FollowerEmotion.Apply(follower, emotion);
-                replyEmotionShown = true;
-            }
+            FollowerEmotion.Apply(follower, emotion);
+            replyEmotionShown = true;
         }
-        else SetFollowerDialogueAnimation("talk");
-        SetVisibleLine(text, false);
+        if (newPage) SwitchToFollower(text);
+        else SetVisibleLine(text, false);
         MMConversation.mmConversation.NextArrowContainer.SetActive(true);
     }
 
@@ -263,6 +270,8 @@ internal sealed class NativeDialogue
     public void Close()
     {
         closing = true;
+        UnsubscribeTextPlayer();
+        StopSpeaking();
         FollowerEmotion.Restore(follower);
         if (IsCurrent()) MMConversation.mmConversation.CloseImmediately(true, null, true);
         if (active == this) active = null;
@@ -270,32 +279,27 @@ internal sealed class NativeDialogue
         follower = null;
     }
 
-    private IEnumerator ShowThinkingAfterPause()
-    {
-        yield return new WaitForSecondsRealtime(.45f);
-        if (IsCurrent() && waiting && !replyVisible) SwitchToFollower();
-    }
-
-    private void SwitchToFollower()
+    private void SwitchToFollower(string text)
     {
         if (!IsCurrent() || follower == null || conversation == null) return;
         replyVisible = true;
-        visibleLine = "...";
+        visibleLine = text;
         currentEntryIndex = conversation.Entries.Count;
         conversation.Entries.Add(new ConversationEntry(follower.gameObject,
-            "...", "idle", "", null, follower.Brain.Info.Name)
+            text, "idle", "", null, follower.Brain.Info.Name)
         {
-            SetZoom = true, Zoom = ConversationZoom
+            SetZoom = true, Zoom = ConversationZoom,
+            SkeletonData = follower.Spine, followerID = follower.Brain.Info.ID
         });
         MMConversation.Position = currentEntryIndex - 1;
         ShowNextLine?.Invoke(MMConversation.mmConversation, new object[] { true });
-        SetVisibleLine("...", true);
-        MMConversation.mmConversation.NextArrowContainer.SetActive(false);
     }
 
     private void StartNextTurn()
     {
         if (!IsCurrent() || conversation == null) return;
+        StopSpeaking();
+        StopFollowerVoice();
         FollowerEmotion.Restore(follower);
         draft.Clear();
         waiting = false;
@@ -344,11 +348,55 @@ internal sealed class NativeDialogue
         catch (Exception error) { plugin.LogActionError("dialogue animation", error); }
     }
 
+    private void OnCharacterVisible(char character)
+    {
+        if (!IsCurrent() || !replyVisible || waiting || replyFinished ||
+            !char.IsLetterOrDigit(character)) return;
+        lastVisibleCharacter = Time.unscaledTime;
+        if (mouthSpeaking) return;
+        mouthOverlay = FollowerEmotion.StartSpeakingMouth(follower);
+        if (!mouthOverlay) SetFollowerDialogueAnimation("talk");
+        mouthSpeaking = true;
+    }
+
+    private void StopSpeaking()
+    {
+        if (!mouthSpeaking) return;
+        if (mouthOverlay) FollowerEmotion.StopSpeakingMouth(follower);
+        else SetFollowerDialogueAnimation("idle");
+        mouthSpeaking = false;
+        mouthOverlay = false;
+    }
+
+    private void StopFollowerVoice()
+    {
+        if (!IsCurrent() || TalkSoundInstance == null) return;
+        try
+        {
+            var conversationView = MMConversation.mmConversation;
+            if (TalkSoundInstance.GetValue(conversationView) is EventInstance sound && sound.isValid())
+            {
+                AudioManager.Instance.StopLoop(sound, STOP_MODE.IMMEDIATE);
+                TalkSoundInstance.SetValue(conversationView, default(EventInstance));
+            }
+        }
+        catch (Exception error) { plugin.LogActionError("dialogue voice", error); }
+    }
+
+    private void UnsubscribeTextPlayer()
+    {
+        if (subscribedTextPlayer == null) return;
+        subscribedTextPlayer.onCharacterVisible.RemoveListener(OnCharacterVisible);
+        subscribedTextPlayer = null;
+    }
+
     private bool IsCurrent() => conversation != null &&
         MMConversation.CURRENT_CONVERSATION == conversation && MMConversation.mmConversation != null;
 
     private void OnConversationClosed()
     {
+        UnsubscribeTextPlayer();
+        StopSpeaking();
         conversation = null;
         if (active == this) active = null;
         if (!closing) (interrupted ?? closed)?.Invoke();

@@ -11,6 +11,8 @@ internal static class FollowerEmotion
     private const int DialogueMouthTrack = 3;
     private const string DayMoodPrefix = "FollowerTalk/dayMood/";
     private static readonly Dictionary<int, (Follower Follower, string Emotion)> DayMoods = new();
+    private static readonly Dictionary<int, (Follower Follower, string Animation, bool PreviousOverride)>
+        DialogueEmotions = new();
     private static string currentSave = "";
     private static float nextScan;
     private static float nextRefresh;
@@ -138,8 +140,11 @@ internal static class FollowerEmotion
                 }
                 return false;
             }
-            state.SetAnimation(DialogueMouthTrack,
+            var speaking = state.SetAnimation(DialogueMouthTrack,
                 new Animation("FollowerTalk/mouth", mouthTimelines, talk.Duration), true);
+            speaking.MixDuration = 0f;
+            speaking.Alpha = 1f;
+            speaking.TimeScale = 1.5f;
             return true;
         }
         catch (Exception error)
@@ -179,8 +184,9 @@ internal static class FollowerEmotion
 
     public static void StopSpeakingMouth(Follower? follower)
     {
-        if (follower != null && follower.Spine != null && follower.Spine.AnimationState != null)
-            follower.Spine.AnimationState.ClearTrack(DialogueMouthTrack);
+        var state = follower?.Spine?.AnimationState;
+        if (state?.GetCurrent(DialogueMouthTrack)?.Animation?.Name == "FollowerTalk/mouth")
+            state.ClearTrack(DialogueMouthTrack);
     }
 
     public static void Apply(Follower? follower, string emotion)
@@ -203,13 +209,22 @@ internal static class FollowerEmotion
                     "Follower animation unavailable: " + face));
                 return;
             }
+            int id = follower.Brain.Info.ID;
+            if (!DialogueEmotions.TryGetValue(id, out var previous) || previous.Follower != follower)
+                DialogueEmotions[id] = (follower, face, follower.OverridingEmotions);
+            else DialogueEmotions[id] = (follower, face, previous.PreviousOverride);
             follower.OverridingEmotions = true;
             spine.AnimationState.SetAnimation(DialogueEmotionTrack, face, true);
             Plugin.Instance.LogEmotion(emotion, face);
         }
         catch (Exception error)
         {
-            follower.OverridingEmotions = false;
+            if (follower.Brain != null &&
+                DialogueEmotions.TryGetValue(follower.Brain.Info.ID, out var owned))
+            {
+                DialogueEmotions.Remove(follower.Brain.Info.ID);
+                follower.OverridingEmotions = owned.PreviousOverride;
+            }
             Plugin.Instance.LogActionError("emotion", error);
         }
     }
@@ -229,10 +244,16 @@ internal static class FollowerEmotion
         try
         {
             StopSpeakingMouth(follower);
-            if (follower.Spine != null && follower.Spine.AnimationState != null)
-                follower.Spine.AnimationState.ClearTrack(DialogueEmotionTrack);
-            follower.OverridingEmotions = false;
-            follower.SetEmotionAnimation();
+            int id = follower.Brain.Info.ID;
+            if (!DialogueEmotions.TryGetValue(id, out var owned) || owned.Follower != follower)
+                return;
+            DialogueEmotions.Remove(id);
+            var state = follower.Spine?.AnimationState;
+            if (state?.GetCurrent(DialogueEmotionTrack)?.Animation?.Name != owned.Animation)
+                return;
+            state.ClearTrack(DialogueEmotionTrack);
+            follower.OverridingEmotions = owned.PreviousOverride;
+            if (!owned.PreviousOverride) follower.SetEmotionAnimation();
         }
         catch (Exception error)
         {

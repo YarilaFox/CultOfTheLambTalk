@@ -115,6 +115,35 @@ public sealed class Plugin : BaseUnityPlugin
             prefix: new HarmonyMethod(typeof(NativeDialogue), nameof(NativeDialogue.AllowBackToWork)));
         harmony.Patch(AccessTools.Method(typeof(interaction_FollowerInteraction), "GiveItemRoutine"),
             postfix: new HarmonyMethod(typeof(Plugin), nameof(WrapGiftRoutine)));
+        try
+        {
+            var faithNotification = AccessTools.DeclaredMethod(typeof(NotificationFaith), "Configure",
+                new[] { typeof(string), typeof(float), typeof(FollowerInfo), typeof(bool),
+                    typeof(NotificationBase.Flair), typeof(bool), typeof(string[]) });
+            if (faithNotification != null)
+                harmony.Patch(faithNotification,
+                    finalizer: new HarmonyMethod(typeof(Plugin), nameof(RecoverFaithNotification)));
+            else Logger.LogWarning("Faith notification patch unavailable; continuing without it.");
+        }
+        catch (Exception error)
+        {
+            Logger.LogWarning("Faith notification patch failed; continuing without it: " + error);
+        }
+        try
+        {
+            var relationshipNotification = AccessTools.DeclaredMethod(typeof(NotificationRelationship), "Configure",
+                new[] { typeof(NotificationCentre.NotificationType), typeof(FollowerInfo),
+                    typeof(FollowerInfo), typeof(NotificationFollower.Animation),
+                    typeof(NotificationFollower.Animation), typeof(NotificationBase.Flair) });
+            if (relationshipNotification != null)
+                harmony.Patch(relationshipNotification,
+                    prefix: new HarmonyMethod(typeof(Plugin), nameof(GuardRelationshipNotification)));
+            else Logger.LogWarning("Relationship notification patch unavailable; continuing without it.");
+        }
+        catch (Exception error)
+        {
+            Logger.LogWarning("Relationship notification patch failed; continuing without it: " + error);
+        }
         harmony.Patch(AccessTools.Method(typeof(Lamb.UI.AltarMenu.UIAltarMenuController), "Start"),
             postfix: new HarmonyMethod(typeof(AltarAnnouncementMenu), nameof(AltarAnnouncementMenu.Install)));
         harmony.Patch(AccessTools.Method(typeof(Lamb.UI.AltarMenu.UIAltarMenuController), "OnEnable"),
@@ -273,7 +302,11 @@ public sealed class Plugin : BaseUnityPlugin
 
     private void OnGUI() => window.Draw();
 
-    private void OnDestroy() => harmony?.UnpatchSelf();
+    private void OnDestroy()
+    {
+        window?.Shutdown();
+        harmony?.UnpatchSelf();
+    }
 
     internal void OpenTalk(Follower follower, interaction_FollowerInteraction? heldInteraction,
         FollowerActivity activity) =>
@@ -341,6 +374,88 @@ public sealed class Plugin : BaseUnityPlugin
     internal void LogFaith(string follower, float before, float after) =>
         Logger.LogInfo("Personal faith: " + follower + " " + before + " -> " + after);
 
+    private static Exception? RecoverFaithNotification(Exception? __exception,
+        NotificationFaith __instance, string locKey, float faithDelta,
+        FollowerInfo followerInfo, bool includeName, NotificationBase.Flair flair,
+        bool showAdditionSubtractionSymbols, string[] args)
+    {
+        if (__exception is not NullReferenceException ||
+            __exception.StackTrace?.Contains("SpineExtensions.ConfigureFollowerSkin") != true ||
+            followerInfo == null)
+            return __exception;
+        try
+        {
+            __instance.Configure(locKey, faithDelta, null, includeName, flair,
+                showAdditionSubtractionSymbols, args);
+            Instance.Logger.LogWarning("Faith notification portrait unavailable; displayed without portrait.");
+            return null;
+        }
+        catch (Exception fallbackError)
+        {
+            Instance.Logger.LogWarning("Faith notification fallback failed: " + fallbackError);
+            return __exception;
+        }
+    }
+
+    private static bool GuardRelationshipNotification(ref FollowerInfo followerInfoA,
+        ref FollowerInfo followerInfoB)
+    {
+        try
+        {
+            WorshipperData data = WorshipperData.Instance;
+            if (data == null) return true;
+            FollowerInfo? first = NotificationSkinCopy(followerInfoA, data);
+            FollowerInfo? second = NotificationSkinCopy(followerInfoB, data);
+            if (first == null || second == null)
+            {
+                Instance.Logger.LogWarning("Relationship notification skipped: no valid portrait available.");
+                return false;
+            }
+            followerInfoA = first;
+            followerInfoB = second;
+        }
+        catch (Exception error)
+        {
+            Instance.Logger.LogWarning("Relationship notification portrait check failed: " + error);
+            return false;
+        }
+        return true;
+    }
+
+    private static FollowerInfo? NotificationSkinCopy(FollowerInfo info, WorshipperData data)
+    {
+        if (info == null) return null;
+        var skin = !string.IsNullOrEmpty(info.SkinName) ? data.GetColourData(info.SkinName) : null;
+        if (skin != null && info.Traits != null && info.SkinVariation >= 0 && info.SkinColour >= 0 &&
+            skin.Skin != null && skin.Skin.Count > 0 &&
+            skin.SlotAndColours != null && skin.SlotAndColours.Count > 0 &&
+            !string.IsNullOrEmpty(skin.Skin[Math.Min(info.SkinVariation, skin.Skin.Count - 1)]?.Skin) &&
+            skin.SlotAndColours[Math.Min(info.SkinColour, skin.SlotAndColours.Count - 1)] != null)
+            return info;
+
+        foreach (var fallback in data.Characters)
+        {
+            if (fallback?.Skin == null || fallback.Skin.Count == 0 ||
+                string.IsNullOrEmpty(fallback.Skin[0]?.Skin) ||
+                fallback.SlotAndColours == null || fallback.SlotAndColours.Count == 0 ||
+                fallback.SlotAndColours[0] == null)
+                continue;
+
+            // The original FollowerInfo belongs to the save; only the notification gets this skin.
+            var copy = (FollowerInfo)AccessTools.Method(typeof(object), "MemberwiseClone")
+                .Invoke(info, null);
+            copy.SkinName = fallback.Skin[0].Skin;
+            copy.SkinVariation = 0;
+            copy.SkinColour = 0;
+            copy.Traits ??= new System.Collections.Generic.List<FollowerTrait.TraitType>();
+            Instance.Logger.LogWarning("Relationship notification used a fallback portrait for follower " + info.ID + ".");
+            return copy;
+        }
+
+        Instance.Logger.LogWarning("Relationship notification has no valid fallback portrait for follower " + info.ID + ".");
+        return null;
+    }
+
     internal void LogGiftSelection(string selection) =>
         Logger.LogInfo("Gift menu selection: " + selection);
 
@@ -352,6 +467,13 @@ public sealed class Plugin : BaseUnityPlugin
         Logger.LogWarning("Conversation API failed: provider=" + provider +
             "; model=" + model + "; status=" + status +
             "; detail=" + detail + "; transport=" + transportError);
+
+    internal void LogResponseParseFailure(string provider, string model, string reason,
+        string finishReason, int envelopeLength, int textLength) =>
+        Logger.LogWarning("Conversation response unreadable: provider=" + provider +
+            "; model=" + model + "; reason=" + reason +
+            "; finish=" + finishReason + "; envelope_chars=" + envelopeLength +
+            "; text_chars=" + textLength);
 
     internal void LogAnnouncement(string message) =>
         Logger.LogInfo("Cult announcement saved (" + message.Length + " characters).");

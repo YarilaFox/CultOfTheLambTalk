@@ -28,8 +28,13 @@ internal sealed partial class TalkWindow
     private bool revealKey;
     private bool waiting;
     private float previousTimeScale;
+    private UnityEngine.EventSystems.BaseInputModule? gameInputModule;
+    private bool previousGameInputEnabled;
+    private src.UINavigator.UINavigatorNew? gameNavigator;
+    private bool previousNavigationLock;
     private bool pendingFocus;
     private int session;
+    private int settingsSession;
     private string status = "";
     private string editedKey = "";
     private string editedModel = "";
@@ -99,8 +104,10 @@ internal sealed partial class TalkWindow
 
     public void OpenSettings()
     {
-        if (!settingsOpen) previousTimeScale = Time.timeScale;
+        if (settingsOpen || talkOpen || announcementOpen) return;
+        previousTimeScale = Time.timeScale;
         settingsOpen = true;
+        int openSession = ++settingsSession;
         native.SetSettingsVisible(true);
         selectedProvider = plugin.Provider.Value;
         foreach (string provider in Plugin.Providers)
@@ -126,6 +133,25 @@ internal sealed partial class TalkWindow
         status = "";
         pendingFocus = true;
         if (!talkOpen) Time.timeScale = 0f;
+        plugin.RunConversation(BlockGameMenuInputAfterFrame(openSession));
+    }
+
+    private IEnumerator BlockGameMenuInputAfterFrame(int openSession)
+    {
+        yield return null;
+        if (!settingsOpen || settingsSession != openSession) yield break;
+        gameInputModule = UnityEngine.EventSystems.EventSystem.current?.currentInputModule;
+        if (gameInputModule != null)
+        {
+            previousGameInputEnabled = gameInputModule.enabled;
+            gameInputModule.enabled = false;
+        }
+        gameNavigator = src.UINavigator.UINavigatorNew.Instance;
+        if (gameNavigator != null)
+        {
+            previousNavigationLock = gameNavigator.LockInput;
+            gameNavigator.LockInput = true;
+        }
     }
 
     public void HandleUpdate()
@@ -141,7 +167,7 @@ internal sealed partial class TalkWindow
         if (Input.GetKeyDown(KeyCode.F8))
         {
             if (settingsOpen) CloseSettings();
-            else OpenSettings();
+            else if (!talkOpen && !announcementOpen) OpenSettings();
         }
         if (Input.GetKeyDown(KeyCode.Escape))
         {
@@ -197,6 +223,17 @@ internal sealed partial class TalkWindow
     private void CloseSettings()
     {
         settingsOpen = false;
+        settingsSession++;
+        if (gameInputModule != null)
+        {
+            gameInputModule.enabled = previousGameInputEnabled;
+            gameInputModule = null;
+        }
+        if (gameNavigator != null)
+        {
+            gameNavigator.LockInput = previousNavigationLock;
+            gameNavigator = null;
+        }
         revealKey = false;
         editedKey = "";
         stagedKeys.Clear();
@@ -206,6 +243,17 @@ internal sealed partial class TalkWindow
         native.SetSettingsVisible(false);
         native.RefreshInputLanguage();
         if (!talkOpen) Time.timeScale = previousTimeScale;
+    }
+
+    public void Shutdown()
+    {
+        if (settingsOpen) CloseSettings();
+        if (announcementOpen) CloseAnnouncement(false);
+        if (talkOpen)
+        {
+            pendingAction = null;
+            CloseTalk();
+        }
     }
 
     public void OpenAnnouncement(Lamb.UI.AltarMenu.UIAltarMenuController menu)
@@ -340,6 +388,7 @@ internal sealed partial class TalkWindow
     {
         if (message.Length == 0 || selectedFollower == null || waiting) return;
         status = "";
+        pendingAction = null;
         Follower follower = selectedFollower;
         string key = plugin.Keys.Get(plugin.Provider.Value);
         if (string.IsNullOrEmpty(key) &&
@@ -402,7 +451,7 @@ internal sealed partial class TalkWindow
                 else
                 {
                     waiting = false;
-                    if (decision.Action != "none") pendingAction = decision.Action;
+                    pendingAction = decision.Action != "none" ? decision.Action : null;
                     plugin.LogAction(decision.Action, available, decision.Action != "none");
                     AddReply(follower, decision);
                 }
