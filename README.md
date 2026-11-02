@@ -14,6 +14,7 @@ The mod adds a **Talk** command when interacting with a follower. Input and repl
 
 ## Configuration
 
+- [Setup and troubleshooting with screenshots](docs/SETUP.md).
 - Open the game's **Settings > Mods > Conversations** menu. Choose the provider, preset models, reply language, and interface language there.
 - **Settings** opens a small editor for the API key and a custom model ID. You can also open it with F8.
 - Paste the key with Ctrl+V. It is masked until you press the eye button. Each provider has its own key.
@@ -73,6 +74,7 @@ Enter отправляет текст, Ctrl+V вставляет, после о�
 
 ## Настройка
 
+- [Setup and troubleshooting with screenshots (English)](docs/SETUP.md).
 - В настройках игры откройте вкладку Mods и категорию «Разговоры». Провайдер,
   готовые модели и оба языка меняются прямо в строках игрового меню.
 - Пункт «Настроить ключ и модель» открывает небольшое окно для API-ключа и
