@@ -1,8 +1,8 @@
 {
   "name": "Follower_Talk",
-  "version_number": "0.5.0",
+  "version_number": "0.5.2",
   "website_url": "https://github.com/YarilaFox/CultOfTheLambTalk",
-  "description": "Talk to your followers in Cult of the Lamb using your own OpenAI or Gemini API key. Followers can remember conversations and perform supported in-game tasks.",
+  "description": "Talk to followers with your own AI provider. They remember conversations and can perform supported in-game tasks.",
   "dependencies": [
     "BepInEx-BepInExPack_CultOfTheLamb-5.4.2101",
     "xhayper-COTL_API-0.3.4"

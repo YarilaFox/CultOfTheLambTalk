@@ -30,6 +30,31 @@ internal sealed class FollowerMemory
         return history;
     }
 
+    public string PersonalPrompt(Follower follower) =>
+        FollowerState(follower)["personal_prompt"]?.Value<string>() ?? "";
+
+    public string PersonalPrompt(int followerId) =>
+        FollowerState(followerId)["personal_prompt"]?.Value<string>() ?? "";
+
+    public bool SetPersonalPrompt(Follower follower, string prompt)
+    {
+        return SetPersonalPrompt(follower.Brain.Info.ID, prompt);
+    }
+
+    public bool SetPersonalPrompt(int followerId, string prompt)
+    {
+        FollowerState(followerId)["personal_prompt"] = prompt.Trim();
+        return Save();
+    }
+
+    public IEnumerable<int> KnownFollowerIds()
+    {
+        EnsureSave();
+        if (data["followers"] is not JObject followers) yield break;
+        foreach (JProperty entry in followers.Properties())
+            if (int.TryParse(entry.Name, out int id)) yield return id;
+    }
+
     public void AddTurn(Follower follower, bool player, string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return;
@@ -147,7 +172,9 @@ internal sealed class FollowerMemory
             string.Join(". ", parts) + ".";
     }
 
-    private JObject FollowerState(Follower follower)
+    private JObject FollowerState(Follower follower) => FollowerState(follower.Brain.Info.ID);
+
+    private JObject FollowerState(int followerId)
     {
         EnsureSave();
         JObject? followers = data["followers"] as JObject;
@@ -156,7 +183,7 @@ internal sealed class FollowerMemory
             followers = new JObject();
             data["followers"] = followers;
         }
-        string id = follower.Brain.Info.ID.ToString();
+        string id = followerId.ToString();
         JObject? state = followers[id] as JObject;
         if (state == null)
         {

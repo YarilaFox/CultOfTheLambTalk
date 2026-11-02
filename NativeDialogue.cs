@@ -21,6 +21,7 @@ internal sealed class NativeDialogue
     private ConversationObject? conversation;
     private Action<string>? submitted;
     private Action? closed;
+    private Action? interrupted;
     private readonly DialogueDraft draft = new();
     private string visibleLine = "";
     private bool waiting;
@@ -32,6 +33,8 @@ internal sealed class NativeDialogue
     private bool settingsVisible;
     private bool closing;
     private int currentEntryIndex;
+    private float nextThinkingFrame;
+    private int thinkingDots;
 
     public NativeDialogue(Plugin plugin) => this.plugin = plugin;
     private string InputHint => UiText.Get(plugin.UiLanguage, "input.hint");
@@ -39,6 +42,9 @@ internal sealed class NativeDialogue
 
     public static bool IsTalkingTo(Follower follower) =>
         active != null && active.follower == follower && active.IsCurrent();
+
+    public bool IsVisible => IsCurrent() &&
+        MMConversation.mmConversation.gameObject.activeInHierarchy;
 
     public void RefreshInputLanguage()
     {
@@ -62,8 +68,11 @@ internal sealed class NativeDialogue
         return false;
     }
 
-    public static bool AllowPauseMenu() => active == null &&
-        Time.frameCount > suppressPauseThroughFrame;
+    public static bool AllowPauseMenu()
+    {
+        if (active != null && !active.IsVisible) active = null;
+        return active == null && Time.frameCount > suppressPauseThroughFrame;
+    }
 
     public static void SuppressPauseForEscape() =>
         suppressPauseThroughFrame = Time.frameCount + 1;
@@ -83,6 +92,12 @@ internal sealed class NativeDialogue
         if (!IsCurrent() || settingsVisible) return;
         if (replyVisible)
         {
+            if (waiting && follower != null && Time.unscaledTime >= nextThinkingFrame)
+            {
+                thinkingDots = thinkingDots % 3 + 1;
+                SetVisibleLine(new string('.', thinkingDots), true);
+                nextThinkingFrame = Time.unscaledTime + .45f;
+            }
             if (!waiting && !replyFinished &&
                 MMConversation.mmConversation.TextPlayer.textAnimator.allLettersShown)
             {
@@ -139,11 +154,20 @@ internal sealed class NativeDialogue
         if (display != visibleLine) SetVisibleLine(display, true);
     }
 
-    public void Open(Follower target, Action<string> onSubmit, Action onClose)
+    public void Open(Follower target, Action<string> onSubmit, Action onClose) =>
+        OpenInput(target, onSubmit, onClose);
+
+    public void OpenAnnouncement(Action<string> onSubmit, Action onClose,
+        Action onInterrupted) =>
+        OpenInput(null, onSubmit, onClose, onInterrupted);
+
+    private void OpenInput(Follower? target, Action<string> onSubmit, Action onClose,
+        Action? onInterrupted = null)
     {
         follower = target;
         submitted = onSubmit;
         closed = onClose;
+        interrupted = onInterrupted;
         waiting = false;
         replyVisible = false;
         replyEmotionShown = false;
@@ -151,6 +175,7 @@ internal sealed class NativeDialogue
         replyEmotion = "neutral";
         closeAfterReply = false;
         closing = false;
+        thinkingDots = 0;
         currentEntryIndex = 0;
         draft.Clear();
         visibleLine = draft.Display(InputHint);
@@ -179,9 +204,28 @@ internal sealed class NativeDialogue
     {
         if (!IsCurrent()) return;
         waiting = true;
+        thinkingDots = 0;
+        nextThinkingFrame = Time.unscaledTime;
         SetVisibleLine(playerMessage, true);
         MMConversation.mmConversation.NextArrowContainer.SetActive(false);
         plugin.RunConversation(ShowThinkingAfterPause());
+    }
+
+    public void ShowAnnouncement(string message)
+    {
+        if (!IsCurrent()) return;
+        replyVisible = true;
+        waiting = true;
+        closeAfterReply = true;
+        SetVisibleLine(message, false);
+        MMConversation.mmConversation.NextArrowContainer.SetActive(false);
+    }
+
+    public void AnnouncementReady()
+    {
+        if (!IsCurrent()) return;
+        waiting = false;
+        MMConversation.mmConversation.NextArrowContainer.SetActive(true);
     }
 
     public void ShowReply(string text, bool endConversation = false, string emotion = "neutral")
@@ -307,6 +351,6 @@ internal sealed class NativeDialogue
     {
         conversation = null;
         if (active == this) active = null;
-        if (!closing) closed?.Invoke();
+        if (!closing) (interrupted ?? closed)?.Invoke();
     }
 }

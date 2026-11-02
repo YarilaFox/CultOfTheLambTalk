@@ -3,7 +3,6 @@ obj/
 deps/
 backups/
 release/
-thunderstore/icon.png
 *.user
 *.suo
 *.log

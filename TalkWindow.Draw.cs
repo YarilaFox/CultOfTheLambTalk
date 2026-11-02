@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace FollowerTalk;
@@ -6,234 +7,222 @@ namespace FollowerTalk;
 internal sealed partial class TalkWindow
 {
     private Texture2D? dimTexture;
-    private Texture2D? panelTexture;
-    private Texture2D? buttonTexture;
-    private Texture2D? buttonHoverTexture;
-    private Texture2D? buttonSelectedTexture;
-    private Texture2D? fieldTexture;
-    private Texture2D? eyeTexture;
-    private Texture2D? hiddenEyeTexture;
-    private GUIStyle? panelStyle;
-    private GUIStyle? settingsPanelStyle;
-    private GUIStyle? settingsFieldStyle;
-    private GUIStyle? settingsButtonStyle;
-    private GUIStyle? titleStyle;
-    private GUIStyle? bodyStyle;
-    private GUIStyle? fieldStyle;
-    private GUIStyle? broadcastButtonStyle;
-    private GUIStyle? choiceStyle;
-    private GUIStyle? commandStyle;
-    private string Ui(string key) => UiText.Get(
-        settingsOpen ? SettingsLanguage : plugin.UiLanguage, key);
+    private GUIStyle? panelStyle, fieldStyle, editorStyle, buttonStyle, tabStyle,
+        selectedStyle, titleStyle, labelStyle, hintStyle;
+    private Vector2 promptScroll, followerScroll;
+    private int selectedPromptFollowerId;
+
+    private string Ui(string key) => UiText.Get(SettingsLanguage, key);
+    private string PromptText(string ru, string en) => SettingsLanguage == "ru" ? ru : en;
 
     public void Draw()
     {
-        bool atAltar = !settingsOpen &&
-            Lamb.UI.UIManager.GetActiveMenu<Lamb.UI.AltarMenu.UIAltarMenuController>() != null;
-        if (!settingsOpen && !broadcastOpen && !atAltar) return;
+        if (!settingsOpen) return;
         EnsureStyles();
-        bool rightToLeft = (settingsOpen ? SettingsLanguage : plugin.UiLanguage) == "ar";
-        titleStyle!.alignment = rightToLeft ? TextAnchor.MiddleRight : TextAnchor.MiddleLeft;
-        bodyStyle!.alignment = rightToLeft ? TextAnchor.MiddleRight : TextAnchor.MiddleLeft;
-        int oldDepth = GUI.depth;
+        int depth = GUI.depth;
         GUI.depth = -1000;
         float scale = Mathf.Min(Screen.width / 1600f, Screen.height / 900f);
-        Matrix4x4 oldMatrix = GUI.matrix;
-        GUI.matrix = Matrix4x4.TRS(Vector3.zero, Quaternion.identity, new Vector3(scale, scale, 1f));
-        float width = Screen.width / scale;
-        float height = Screen.height / scale;
-        if (settingsOpen)
-        {
-            GUI.DrawTexture(new Rect(0, 0, width, height), dimTexture!);
-            DrawSettings(width, height);
-        }
-        else if (broadcastOpen) DrawBroadcast(width, height);
-        else if (GUI.Button(new Rect(width - 310, height - 82, 278, 50),
-            Ui("altar.button"), broadcastButtonStyle!)) OpenBroadcast();
-        GUI.matrix = oldMatrix;
-        GUI.depth = oldDepth;
-    }
-
-    private void DrawBroadcast(float width, float height)
-    {
+        Matrix4x4 matrix = GUI.matrix;
+        GUI.matrix = Matrix4x4.TRS(Vector3.zero, Quaternion.identity,
+            new Vector3(scale, scale, 1f));
+        float width = Screen.width / scale, height = Screen.height / scale;
         GUI.DrawTexture(new Rect(0, 0, width, height), dimTexture!);
-        Rect panel = new Rect((width - 740f) / 2f, (height - 230f) / 2f, 740f, 230f);
-        GUI.Box(panel, "", panelStyle!);
-        GUI.BeginGroup(panel);
-        GUI.Label(new Rect(28, 20, 560, 42), Ui("altar.title"), titleStyle!);
-        if (GUI.Button(new Rect(612, 22, 100, 34), Ui("close"))) broadcastOpen = false;
-        GUI.SetNextControlName("cult-message");
-        broadcastText = GUI.TextField(new Rect(28, 81, 684, 46), broadcastText, 320,
-            fieldStyle!);
-        if (broadcastFocus && Event.current.type == EventType.Repaint)
-        {
-            GUI.FocusControl("cult-message");
-            broadcastFocus = false;
-        }
-        if (GUI.Button(new Rect(542, 156, 170, 44), Ui("speak"), broadcastButtonStyle!))
-            SaveBroadcast();
-        if (broadcastStatus.Length > 0)
-            GUI.Label(new Rect(28, 158, 495, 44), broadcastStatus, bodyStyle!);
-        if (Event.current.type == EventType.KeyDown &&
-            (Event.current.keyCode == KeyCode.Return ||
-             Event.current.keyCode == KeyCode.KeypadEnter))
-        {
-            SaveBroadcast();
-            Event.current.Use();
-        }
-        GUI.EndGroup();
+        DrawSettings(width, height);
+        GUI.matrix = matrix;
+        GUI.depth = depth;
     }
 
     private void DrawSettings(float width, float height)
     {
-        Rect panel = new Rect((width - 680f) / 2f, (height - 340f) / 2f, 680f, 340f);
-        GUI.Box(panel, "", settingsPanelStyle!);
+        Rect panel = new Rect((width - 900) / 2, (height - 680) / 2, 900, 680);
+        GUI.Box(panel, "", panelStyle!);
         GUI.BeginGroup(panel);
-        GUI.Label(new Rect(30, 18, 554, 42), Ui("settings.title"), titleStyle!);
-        if (GUI.Button(new Rect(614, 20, 40, 40), "×", settingsButtonStyle!)) CloseSettings();
-        GUI.Label(new Rect(30, 67, 610, 28), selectedProvider, bodyStyle!);
-        GUI.Label(new Rect(30, 104, 610, 28), Ui("api.key"), bodyStyle!);
+        GUI.Label(new Rect(32, 20, 720, 42), Ui("settings.title"), titleStyle!);
+        if (GUI.Button(new Rect(832, 20, 38, 38), "×", buttonStyle!)) CloseSettings();
+        string[] tabs = {
+            PromptText("Подключение", "Connection"),
+            PromptText("Общий промпт", "Shared prompt"),
+            PromptText("Последователи", "Followers")
+        };
+        for (int i = 0; i < tabs.Length; i++)
+            if (GUI.Button(new Rect(32 + i * 280, 80, 270, 42), tabs[i],
+                i == settingsTab ? selectedStyle! : tabStyle!))
+            {
+                settingsTab = i;
+                promptScroll = Vector2.zero;
+                GUI.FocusControl("");
+            }
+        if (settingsTab == 0) DrawConnection();
+        else if (settingsTab == 1) DrawSharedPrompt();
+        else DrawFollowerPrompt();
+        if (GUI.Button(new Rect(32, 612, 160, 42), Ui("save"), buttonStyle!)) SaveSettings();
+        GUI.Label(new Rect(210, 614, 660, 38), status, hintStyle!);
+        GUI.EndGroup();
+    }
+
+    private void DrawConnection()
+    {
+        GUI.Label(new Rect(32, 146, 240, 30), Ui("provider"), labelStyle!);
+        int providerIndex = Array.IndexOf(Plugin.Providers, selectedProvider);
+        if (GUI.Button(new Rect(390, 140, 48, 42), "<", buttonStyle!))
+            SelectProvider(Plugin.Providers[(providerIndex + Plugin.Providers.Length - 1) %
+                Plugin.Providers.Length]);
+        GUI.Label(new Rect(452, 146, 340, 30), selectedProvider, labelStyle!);
+        if (GUI.Button(new Rect(820, 140, 48, 42), ">", buttonStyle!))
+            SelectProvider(Plugin.Providers[(providerIndex + 1) % Plugin.Providers.Length]);
+        GUI.Label(new Rect(32, 205, 830, 28), Ui("api.key"), labelStyle!);
         GUI.SetNextControlName("api-key");
         editedKey = revealKey
-            ? GUI.TextField(new Rect(30, 137, 546, 42), editedKey, 512, settingsFieldStyle!)
-            : GUI.PasswordField(new Rect(30, 137, 546, 42), editedKey, '•', 512, settingsFieldStyle!);
+            ? GUI.TextField(new Rect(32, 242, 744, 44), editedKey, 512, fieldStyle!)
+            : GUI.PasswordField(new Rect(32, 242, 744, 44), editedKey, '•', 512, fieldStyle!);
         if (pendingFocus && Event.current.type == EventType.Repaint)
         {
             GUI.FocusControl("api-key");
             pendingFocus = false;
         }
-        if (GUI.Button(new Rect(586, 137, 68, 42), new GUIContent("", revealKey
-            ? Ui("key.hide") : Ui("key.show")), settingsButtonStyle!))
-            revealKey = !revealKey;
-        GUI.DrawTexture(new Rect(607, 145, 26, 26), revealKey ? hiddenEyeTexture! : eyeTexture!);
-        if (!string.IsNullOrEmpty(GUI.tooltip))
-            GUI.Label(new Rect(450, 180, 204, 24), GUI.tooltip, bodyStyle!);
-        GUI.Label(new Rect(30, 191, 610, 28), Ui("model"), bodyStyle!);
-        editedModel = GUI.TextField(new Rect(30, 224, 624, 42), editedModel, 100,
-            settingsFieldStyle!);
-        if (GUI.Button(new Rect(30, 281, 180, 42), Ui("save"), settingsButtonStyle!)) SaveSettings();
-        GUI.Label(new Rect(225, 283, 429, 38), status, bodyStyle!);
-        GUI.EndGroup();
+        if (GUI.Button(new Rect(788, 242, 80, 44),
+            revealKey ? Ui("key.hide") : Ui("key.show"), buttonStyle!)) revealKey = !revealKey;
+        GUI.Label(new Rect(32, 318, 830, 28), Ui("model"), labelStyle!);
+        editedModel = GUI.TextField(new Rect(32, 354, 836, 44), editedModel, 100,
+            fieldStyle!);
+        if (NeedsEndpoint(selectedProvider))
+        {
+            GUI.Label(new Rect(32, 415, 830, 28), "API URL", labelStyle!);
+            editedEndpoint = GUI.TextField(new Rect(32, 450, 836, 44), editedEndpoint,
+                512, fieldStyle!);
+        }
+        GUI.Label(new Rect(32, 515, 830, 54), Ui("model.hint"), hintStyle!);
+    }
+
+    private void DrawSharedPrompt()
+    {
+        GUI.Label(new Rect(32, 142, 830, 28),
+            PromptText("Инструкции для всех последователей", "Instructions for all followers"),
+            labelStyle!);
+        GUI.Label(new Rect(32, 174, 830, 38),
+            PromptText("Изменение заменит стандартный текст. Игровые действия проверяются отдельно.",
+                "Changes replace the default text. Game actions are checked separately."), hintStyle!);
+        DrawEditor(new Rect(32, 220, 836, 340), ref editedPrompt);
+        if (GUI.Button(new Rect(32, 568, 200, 34),
+            PromptText("Вернуть стандартный", "Restore default"), buttonStyle!))
+        {
+            editedPrompt = ConversationApi.DefaultInstructions(plugin.ContextLanguage(""));
+            promptScroll = Vector2.zero;
+            GUI.FocusControl("");
+        }
+    }
+
+    private void DrawFollowerPrompt()
+    {
+        GUI.Label(new Rect(32, 142, 830, 28),
+            PromptText("Личное дополнение", "Personal instructions"), labelStyle!);
+        GUI.Label(new Rect(32, 172, 830, 40),
+            PromptText("Выбери последователя. Переименование не сотрёт его настройки.",
+                "Select a follower. Renaming will not erase their settings."), hintStyle!);
+        var ids = new List<int>(plugin.Memory.KnownFollowerIds());
+        if (selectedFollower != null && !ids.Contains(selectedFollower.Brain.Info.ID))
+            ids.Insert(0, selectedFollower.Brain.Info.ID);
+        followerScroll = GUI.BeginScrollView(new Rect(32, 220, 222, 340), followerScroll,
+            new Rect(0, 0, 200, Mathf.Max(340, ids.Count * 44)));
+        for (int i = 0; i < ids.Count; i++)
+        {
+            int id = ids[i];
+            FollowerBrain brain = FollowerBrain.FindBrainByID(id);
+            string name = brain?.Info.Name ?? "#" + id;
+            if (GUI.Button(new Rect(0, i * 44, 194, 40), name,
+                selectedPromptFollowerId == id ? selectedStyle! : tabStyle!))
+            {
+                selectedPromptFollowerId = id;
+                promptScroll = Vector2.zero;
+                GUI.FocusControl("");
+            }
+        }
+        GUI.EndScrollView();
+        if (selectedPromptFollowerId == 0)
+        {
+            GUI.Label(new Rect(276, 238, 580, 90),
+                PromptText("Сначала поговори с последователем, затем открой настройки.",
+                    "Talk to a follower first, then open settings."), hintStyle!);
+            return;
+        }
+        int followerId = selectedPromptFollowerId;
+        string nameLabel = FollowerBrain.FindBrainByID(followerId)?.Info.Name ?? "#" + followerId;
+        GUI.Label(new Rect(276, 220, 580, 28), nameLabel, labelStyle!);
+        string draft = stagedPersonalPrompts.TryGetValue(followerId, out string? value)
+            ? value : plugin.Memory.PersonalPrompt(followerId);
+        DrawEditor(new Rect(276, 254, 592, 306), ref draft);
+        stagedPersonalPrompts[followerId] = draft;
+        if (GUI.Button(new Rect(276, 568, 160, 34),
+            PromptText("Очистить", "Clear"), buttonStyle!))
+            stagedPersonalPrompts[followerId] = "";
+    }
+
+    private void DrawEditor(Rect rect, ref string value)
+    {
+        float contentHeight = Mathf.Max(rect.height - 8,
+            editorStyle!.CalcHeight(new GUIContent(value + "\n"), rect.width - 44) + 22);
+        promptScroll = GUI.BeginScrollView(rect, promptScroll,
+            new Rect(0, 0, rect.width - 18, contentHeight));
+        value = GUI.TextArea(new Rect(0, 0, rect.width - 28, contentHeight), value,
+            12000, editorStyle!);
+        GUI.EndScrollView();
     }
 
     private void EnsureStyles()
     {
         if (panelStyle != null) return;
-        dimTexture = SolidTexture(new Color(0f, 0f, 0f, 0.82f));
-        panelTexture = InkTexture(64, new Color(.035f, .028f, .027f),
-            new Color(.012f, .009f, .009f), 12);
-        buttonTexture = InkTexture(48, new Color(.07f, .058f, .05f),
-            new Color(.49f, .37f, .28f), 8);
-        buttonHoverTexture = InkTexture(48, new Color(.16f, .1f, .075f),
-            new Color(.85f, .7f, .49f), 8);
-        buttonSelectedTexture = InkTexture(48, new Color(.28f, .045f, .04f),
-            new Color(.97f, .68f, .43f), 8);
-        fieldTexture = InkTexture(48, new Color(.025f, .022f, .02f),
-            new Color(.42f, .31f, .23f), 8);
-        eyeTexture = EyeTexture(false);
-        hiddenEyeTexture = EyeTexture(true);
-        panelStyle = new GUIStyle(GUI.skin.box)
+        dimTexture = SolidTexture(new Color(0, 0, 0, .82f));
+        Texture2D panel = SolidTexture(new Color(.065f, .067f, .07f));
+        Texture2D field = SolidTexture(new Color(.12f, .125f, .13f));
+        Texture2D button = SolidTexture(new Color(.17f, .175f, .18f));
+        Texture2D hover = SolidTexture(new Color(.24f, .245f, .25f));
+        Texture2D selected = SolidTexture(new Color(.31f, .12f, .11f));
+        Color text = new Color(.94f, .92f, .85f);
+        panelStyle = new GUIStyle(GUI.skin.box) { normal = { background = panel } };
+        fieldStyle = new GUIStyle(GUI.skin.textField)
         {
-            normal = { background = panelTexture },
-            border = new RectOffset(12, 12, 12, 12)
+            fontSize = 21, padding = new RectOffset(12, 12, 8, 8),
+            normal = { background = field, textColor = text },
+            focused = { background = field, textColor = Color.white }
         };
-        settingsPanelStyle = new GUIStyle(GUI.skin.box)
+        editorStyle = new GUIStyle(GUI.skin.textArea)
         {
-            normal = { background = SolidTexture(new Color(.045f, .042f, .041f)) },
-            border = new RectOffset(2, 2, 2, 2)
+            fontSize = 18, wordWrap = true, padding = new RectOffset(14, 14, 12, 12),
+            normal = { background = field, textColor = text },
+            focused = { background = field, textColor = Color.white }
+        };
+        buttonStyle = new GUIStyle(GUI.skin.button)
+        {
+            fontSize = 19, alignment = TextAnchor.MiddleCenter,
+            normal = { background = button, textColor = text },
+            hover = { background = hover, textColor = Color.white },
+            active = { background = hover, textColor = Color.white }
+        };
+        tabStyle = new GUIStyle(buttonStyle) { fontSize = 20 };
+        selectedStyle = new GUIStyle(tabStyle)
+        {
+            normal = { background = selected, textColor = Color.white },
+            hover = { background = selected, textColor = Color.white }
         };
         titleStyle = new GUIStyle(GUI.skin.label)
         {
-            fontSize = 29,
-            fontStyle = FontStyle.Bold,
-            normal = { textColor = new Color(1f, 0.88f, 0.57f) }
+            fontSize = 29, fontStyle = FontStyle.Bold, normal = { textColor = text }
         };
-        bodyStyle = new GUIStyle(GUI.skin.label)
+        labelStyle = new GUIStyle(GUI.skin.label)
         {
-            fontSize = 18,
-            wordWrap = true,
-            normal = { textColor = new Color(0.93f, 0.88f, 0.76f) }
+            fontSize = 20, normal = { textColor = text }
         };
-        choiceStyle = new GUIStyle(GUI.skin.button)
+        hintStyle = new GUIStyle(GUI.skin.label)
         {
-            fontSize = 18,
-            alignment = TextAnchor.MiddleCenter,
-            border = new RectOffset(8, 8, 8, 8),
-            normal = { background = buttonTexture, textColor = new Color(.93f, .88f, .76f) },
-            hover = { background = buttonHoverTexture, textColor = Color.white },
-            active = { background = buttonSelectedTexture, textColor = Color.white },
-            onNormal = { background = buttonSelectedTexture, textColor = Color.white },
-            onHover = { background = buttonSelectedTexture, textColor = Color.white },
-            onActive = { background = buttonSelectedTexture, textColor = Color.white }
+            fontSize = 17, wordWrap = true,
+            normal = { textColor = new Color(.67f, .68f, .68f) }
         };
-        commandStyle = new GUIStyle(choiceStyle)
-        {
-            fontStyle = FontStyle.Bold,
-            normal = { background = buttonSelectedTexture, textColor = Color.white }
-        };
-        broadcastButtonStyle = new GUIStyle(commandStyle) { fontSize = 19 };
-        fieldStyle = new GUIStyle(GUI.skin.textField)
-        {
-            fontSize = 19,
-            padding = new RectOffset(12, 12, 8, 8),
-            border = new RectOffset(8, 8, 8, 8),
-            normal = { background = fieldTexture, textColor = Color.white },
-            focused = { background = fieldTexture, textColor = Color.white },
-            hover = { background = fieldTexture, textColor = Color.white }
-        };
-        settingsFieldStyle = new GUIStyle(fieldStyle)
-        {
-            normal = { background = SolidTexture(new Color(.15f, .15f, .15f)), textColor = Color.white },
-            focused = { background = SolidTexture(new Color(.2f, .2f, .2f)), textColor = Color.white }
-        };
-        settingsButtonStyle = new GUIStyle(choiceStyle)
-        {
-            normal = { background = SolidTexture(new Color(.4f, .4f, .4f)), textColor = Color.black },
-            hover = { background = SolidTexture(new Color(.55f, .55f, .55f)), textColor = Color.black }
-        };
-    }
-
-    private static Texture2D InkTexture(int size, Color fill, Color edge, int margin)
-    {
-        var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
-        texture.filterMode = FilterMode.Point;
-        for (int y = 0; y < size; y++)
-        for (int x = 0; x < size; x++)
-        {
-            int distance = Math.Min(Math.Min(x, y), Math.Min(size - 1 - x, size - 1 - y));
-            int rough = ((x * 17 + y * 29 + x * y * 3) % 7) - 3;
-            bool visible = distance + rough >= margin / 2;
-            Color color = !visible ? Color.clear : distance < margin ? edge : fill;
-            texture.SetPixel(x, y, color);
-        }
-        texture.Apply();
-        return texture;
     }
 
     private static Texture2D SolidTexture(Color color)
     {
         var texture = new Texture2D(1, 1, TextureFormat.RGBA32, false);
         texture.SetPixel(0, 0, color);
-        texture.Apply();
-        return texture;
-    }
-
-    private static Texture2D EyeTexture(bool crossedOut)
-    {
-        const int size = 24;
-        var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
-        Color clear = new Color(0f, 0f, 0f, 0f);
-        Color paper = new Color(1f, 0.93f, 0.72f);
-        for (int y = 0; y < size; y++)
-        for (int x = 0; x < size; x++)
-        {
-            float dx = (x - 11.5f) / 10f;
-            float dy = (y - 11.5f) / 5f;
-            bool outline = Mathf.Abs(dx * dx + dy * dy - 1f) < .27f;
-            bool pupil = (x - 11.5f) * (x - 11.5f) + (y - 11.5f) * (y - 11.5f) < 8f;
-            bool slash = crossedOut && Mathf.Abs((x + y) - 23) < 1.5f;
-            texture.SetPixel(x, y, outline || pupil || slash ? paper : clear);
-        }
         texture.Apply();
         return texture;
     }

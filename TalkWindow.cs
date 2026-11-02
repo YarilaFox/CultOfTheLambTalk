@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections;
+using System.Linq;
 using UnityEngine;
 
 namespace FollowerTalk;
@@ -11,16 +12,19 @@ internal sealed partial class TalkWindow
     private readonly NativeDialogue native;
     private readonly Dictionary<string, string> stagedKeys = new();
     private readonly Dictionary<string, string> stagedModels = new();
+    private readonly Dictionary<string, string> stagedEndpoints = new();
+    private readonly Dictionary<int, string> stagedPersonalPrompts = new();
     private Follower? selectedFollower;
     private FollowerActivity observedActivity;
     private interaction_FollowerInteraction? heldInteraction;
     private string? pendingAction;
     private bool talkOpen;
     private bool settingsOpen;
-    private bool broadcastOpen;
-    private bool broadcastFocus;
-    private string broadcastText = "";
-    private string broadcastStatus = "";
+    private bool announcementOpen;
+    private bool announcementInputStarted;
+    private float announcementInputTime;
+    private Lamb.UI.AltarMenu.UIAltarMenuController? announcementMenu;
+    private Coroutine? announcementRoutine;
     private bool revealKey;
     private bool waiting;
     private float previousTimeScale;
@@ -29,8 +33,45 @@ internal sealed partial class TalkWindow
     private string status = "";
     private string editedKey = "";
     private string editedModel = "";
+    private string editedEndpoint = "";
+    private string editedPrompt = "";
+    private int settingsTab;
     private string selectedProvider = Plugin.OpenAi;
     private string SettingsLanguage => plugin.UiLanguage;
+    private static bool NeedsEndpoint(string provider) =>
+        provider == Plugin.Compatible || provider == Plugin.OpenClaw ||
+        provider == Plugin.Hermes;
+
+    private string EndpointFor(string provider) => provider == Plugin.OpenClaw
+        ? plugin.OpenClawEndpoint.Value : provider == Plugin.Hermes
+            ? plugin.HermesEndpoint.Value : plugin.CompatibleEndpoint.Value;
+
+    private string ModelFor(string provider) => provider switch
+    {
+        Plugin.Gemini => plugin.GeminiModel.Value,
+        Plugin.Claude => plugin.ClaudeModel.Value,
+        Plugin.Grok => plugin.GrokModel.Value,
+        Plugin.OpenCode => plugin.OpenCodeModel.Value,
+        Plugin.OpenClaw => plugin.OpenClawModel.Value,
+        Plugin.Hermes => plugin.HermesModel.Value,
+        Plugin.DeepSeek => plugin.DeepSeekModel.Value,
+        Plugin.Compatible => plugin.CompatibleModel.Value,
+        _ => plugin.OpenAiModel.Value
+    };
+
+    private void SelectProvider(string provider)
+    {
+        stagedKeys[selectedProvider] = editedKey.Trim();
+        stagedModels[selectedProvider] = editedModel.Trim();
+        if (NeedsEndpoint(selectedProvider)) stagedEndpoints[selectedProvider] = editedEndpoint;
+        selectedProvider = provider;
+        editedKey = stagedKeys[provider];
+        editedModel = stagedModels[provider];
+        editedEndpoint = stagedEndpoints.TryGetValue(provider, out string? endpoint)
+            ? endpoint : EndpointFor(provider);
+        revealKey = false;
+        GUI.FocusControl("");
+    }
     public TalkWindow(Plugin plugin)
     {
         this.plugin = plugin;
@@ -62,12 +103,25 @@ internal sealed partial class TalkWindow
         settingsOpen = true;
         native.SetSettingsVisible(true);
         selectedProvider = plugin.Provider.Value;
-        stagedKeys[Plugin.OpenAi] = plugin.Keys.Get(Plugin.OpenAi);
-        stagedKeys[Plugin.Gemini] = plugin.Keys.Get(Plugin.Gemini);
-        stagedModels[Plugin.OpenAi] = plugin.OpenAiModel.Value;
-        stagedModels[Plugin.Gemini] = plugin.GeminiModel.Value;
+        foreach (string provider in Plugin.Providers)
+        {
+            stagedKeys[provider] = plugin.Keys.Get(provider);
+            stagedModels[provider] = ModelFor(provider);
+        }
+        stagedEndpoints.Clear();
+        foreach (string provider in new[] { Plugin.Compatible, Plugin.OpenClaw, Plugin.Hermes })
+            stagedEndpoints[provider] = EndpointFor(provider);
         editedKey = stagedKeys[selectedProvider];
         editedModel = stagedModels[selectedProvider];
+        editedEndpoint = EndpointFor(selectedProvider);
+        editedPrompt = string.IsNullOrWhiteSpace(plugin.CustomPrompt.Value)
+            ? ConversationApi.DefaultInstructions(plugin.ContextLanguage(""))
+            : plugin.CustomPrompt.Value;
+        selectedPromptFollowerId = selectedFollower?.Brain.Info.ID ?? 0;
+        stagedPersonalPrompts.Clear();
+        settingsTab = 0;
+        promptScroll = Vector2.zero;
+        followerScroll = Vector2.zero;
         revealKey = false;
         status = "";
         pendingFocus = true;
@@ -76,9 +130,14 @@ internal sealed partial class TalkWindow
 
     public void HandleUpdate()
     {
-        if (broadcastOpen &&
-            Lamb.UI.UIManager.GetActiveMenu<Lamb.UI.AltarMenu.UIAltarMenuController>() == null)
-            broadcastOpen = false;
+        if (announcementOpen && announcementInputStarted &&
+            Time.unscaledTime - announcementInputTime > 1f && !native.IsVisible)
+            CloseAnnouncement(false);
+        if (Input.GetKeyDown(KeyCode.F9) && announcementOpen)
+        {
+            CloseAnnouncement(false);
+            return;
+        }
         if (Input.GetKeyDown(KeyCode.F8))
         {
             if (settingsOpen) CloseSettings();
@@ -86,10 +145,10 @@ internal sealed partial class TalkWindow
         }
         if (Input.GetKeyDown(KeyCode.Escape))
         {
-            if (broadcastOpen)
+            if (announcementOpen)
             {
                 NativeDialogue.SuppressPauseForEscape();
-                broadcastOpen = false;
+                CloseAnnouncement();
             }
             else if (settingsOpen) CloseSettings();
             else if (talkOpen)
@@ -141,43 +200,105 @@ internal sealed partial class TalkWindow
         revealKey = false;
         editedKey = "";
         stagedKeys.Clear();
+        stagedEndpoints.Clear();
+        stagedPersonalPrompts.Clear();
+        selectedPromptFollowerId = 0;
         native.SetSettingsVisible(false);
         native.RefreshInputLanguage();
         if (!talkOpen) Time.timeScale = previousTimeScale;
     }
 
-    private void OpenBroadcast()
+    public void OpenAnnouncement(Lamb.UI.AltarMenu.UIAltarMenuController menu)
     {
-        broadcastText = "";
-        broadcastStatus = "";
-        broadcastOpen = true;
-        broadcastFocus = true;
+        if (announcementOpen || talkOpen || settingsOpen) return;
+        announcementMenu = menu;
+        announcementOpen = true;
+        announcementInputStarted = false;
+        session++;
+        menu.Hide(false);
+        announcementRoutine = plugin.StartCoroutine(BeginAnnouncementAfterMenu());
     }
 
-    private void SaveBroadcast()
+    private IEnumerator BeginAnnouncementAfterMenu()
     {
-        string message = broadcastText.Trim();
+        yield return new WaitForSecondsRealtime(.3f);
+        if (!announcementOpen) yield break;
+        native.OpenAnnouncement(SubmitAnnouncement, CloseAnnouncement,
+            () => CloseAnnouncement(false));
+        announcementInputStarted = true;
+        announcementInputTime = Time.unscaledTime;
+    }
+
+    private void SubmitAnnouncement(string message)
+    {
+        if (!announcementOpen) return;
+        message = message.Trim();
         if (message.Length == 0) return;
         if (!plugin.Memory.Announce(message))
         {
-            broadcastStatus = UiText.Get(plugin.UiLanguage, "broadcast.error");
+            native.ShowError(UiText.Get(plugin.UiLanguage, "broadcast.error"));
             return;
         }
         plugin.LogAnnouncement(message);
-        broadcastOpen = false;
+        native.ShowAnnouncement(message);
+        int requestSession = session;
+        announcementRoutine = plugin.StartCoroutine(GatherForAnnouncement(requestSession));
+    }
+
+    private IEnumerator GatherForAnnouncement(int requestSession)
+    {
+        float deadline = Time.realtimeSinceStartup + 15f;
+        while (announcementOpen && Time.realtimeSinceStartup < deadline &&
+               MMTools.MMConversation.mmConversation != null &&
+               !MMTools.MMConversation.mmConversation.TextPlayer.textAnimator.allLettersShown)
+            yield return null;
+        if (!announcementOpen || requestSession != session) yield break;
+
+        if (announcementOpen && requestSession == session) native.AnnouncementReady();
+    }
+
+    private void CloseAnnouncement() => CloseAnnouncement(true);
+
+    private void CloseAnnouncement(bool restoreMenu)
+    {
+        if (!announcementOpen) return;
+        announcementOpen = false;
+        announcementInputStarted = false;
+        session++;
+        if (announcementRoutine != null) plugin.StopCoroutine(announcementRoutine);
+        announcementRoutine = null;
+        native.Close();
+        Lamb.UI.AltarMenu.UIAltarMenuController? menu = announcementMenu;
+        announcementMenu = null;
+        if (restoreMenu && menu != null && Interaction_TempleAltar.Instance != null)
+            menu.Show(false);
+        else SimulationManager.UnPause();
     }
 
     private void SaveSettings()
     {
         stagedKeys[selectedProvider] = editedKey.Trim();
         stagedModels[selectedProvider] = editedModel.Trim();
-        if (string.IsNullOrEmpty(stagedModels[Plugin.OpenAi]) ||
-            string.IsNullOrEmpty(stagedModels[Plugin.Gemini]))
+        if (NeedsEndpoint(selectedProvider)) stagedEndpoints[selectedProvider] = editedEndpoint.Trim();
+        if (string.IsNullOrEmpty(stagedModels[selectedProvider]))
         {
             status = UiText.Get(SettingsLanguage, "models.error");
             return;
         }
-        foreach (string provider in new[] { Plugin.OpenAi, Plugin.Gemini })
+        if (NeedsEndpoint(selectedProvider) && !ConversationApi.ValidEndpoint(editedEndpoint))
+        {
+            status = PromptText("Нужен HTTPS URL или локальный HTTP URL.",
+                "Use an HTTPS URL or a local HTTP URL.");
+            return;
+        }
+        foreach (string provider in new[] { Plugin.Compatible, Plugin.OpenClaw, Plugin.Hermes })
+            if (!ConversationApi.ValidEndpoint(stagedEndpoints[provider]))
+            {
+                status = PromptText("Нужен HTTPS URL или локальный HTTP URL.",
+                    "Use an HTTPS URL or a local HTTP URL.");
+                return;
+            }
+        foreach (string provider in Plugin.Providers)
         {
             if (!plugin.Keys.Save(provider, stagedKeys[provider], SettingsLanguage,
                 out string error))
@@ -189,6 +310,26 @@ internal sealed partial class TalkWindow
         plugin.SetProvider(selectedProvider);
         plugin.OpenAiModel.Value = stagedModels[Plugin.OpenAi];
         plugin.GeminiModel.Value = stagedModels[Plugin.Gemini];
+        plugin.OpenCodeModel.Value = stagedModels[Plugin.OpenCode];
+        plugin.CompatibleModel.Value = stagedModels[Plugin.Compatible];
+        plugin.ClaudeModel.Value = stagedModels[Plugin.Claude];
+        plugin.GrokModel.Value = stagedModels[Plugin.Grok];
+        plugin.OpenClawModel.Value = stagedModels[Plugin.OpenClaw];
+        plugin.HermesModel.Value = stagedModels[Plugin.Hermes];
+        plugin.DeepSeekModel.Value = stagedModels[Plugin.DeepSeek];
+        plugin.CompatibleEndpoint.Value = stagedEndpoints[Plugin.Compatible].TrimEnd('/');
+        plugin.OpenClawEndpoint.Value = stagedEndpoints[Plugin.OpenClaw].TrimEnd('/');
+        plugin.HermesEndpoint.Value = stagedEndpoints[Plugin.Hermes].TrimEnd('/');
+        string defaultPrompt = ConversationApi.DefaultInstructions(plugin.ContextLanguage(""));
+        plugin.CustomPrompt.Value = editedPrompt == defaultPrompt ? "" : editedPrompt.Trim();
+        foreach (KeyValuePair<int, string> entry in stagedPersonalPrompts)
+        {
+            if (!plugin.Memory.SetPersonalPrompt(entry.Key, entry.Value))
+            {
+                status = UiText.Get(SettingsLanguage, "broadcast.error");
+                return;
+            }
+        }
         plugin.RefreshModelSelector();
         plugin.SaveConfiguration();
         status = UiText.Get(plugin.UiLanguage, "saved");
@@ -201,7 +342,9 @@ internal sealed partial class TalkWindow
         status = "";
         Follower follower = selectedFollower;
         string key = plugin.Keys.Get(plugin.Provider.Value);
-        if (string.IsNullOrEmpty(key))
+        if (string.IsNullOrEmpty(key) &&
+            (plugin.Provider.Value != Plugin.Compatible ||
+             !ConversationApi.LocalEndpoint(plugin.CompatibleEndpoint.Value)))
         {
             native.BeginThinking(message);
             native.ShowError(UiText.Get(plugin.UiLanguage, "key.required"));
@@ -212,8 +355,7 @@ internal sealed partial class TalkWindow
         int requestSession = session;
         waiting = true;
         native.BeginThinking(message);
-        string model = plugin.Provider.Value == Plugin.Gemini
-            ? plugin.GeminiModel.Value : plugin.OpenAiModel.Value;
+        string model = ModelFor(plugin.Provider.Value);
         string language = plugin.ContextLanguage(message);
         ActionCatalog actions = FollowerActions.Inspect(follower, heldInteraction, language);
         string followerState = FollowerContext.Capture(follower, language, observedActivity) + " " +
@@ -255,7 +397,7 @@ internal sealed partial class TalkWindow
                             if (requestSession != session || !talkOpen) return;
                             waiting = false;
                             native.ShowError(retryError);
-                        }));
+                        }, personalPrompt: plugin.Memory.PersonalPrompt(follower)));
                 }
                 else
                 {
@@ -270,7 +412,7 @@ internal sealed partial class TalkWindow
                 if (requestSession != session || !talkOpen) return;
                 waiting = false;
                 native.ShowError(error);
-            }));
+            }, personalPrompt: plugin.Memory.PersonalPrompt(follower)));
     }
 
     private void AddReply(Follower follower, ConversationDecision decision)
@@ -310,8 +452,7 @@ internal sealed partial class TalkWindow
         int requestSession = session;
         waiting = true;
         native.BeginThinking(eventText);
-        string model = plugin.Provider.Value == Plugin.Gemini
-            ? plugin.GeminiModel.Value : plugin.OpenAiModel.Value;
+        string model = ModelFor(plugin.Provider.Value);
         plugin.RunConversation(ConversationApi.Generate(plugin.Provider.Value, model,
             plugin.Keys.Get(plugin.Provider.Value), language, follower.Brain.Info.Name,
             FollowerContext.Capture(follower, language, observedActivity) + " " +
@@ -336,7 +477,7 @@ internal sealed partial class TalkWindow
                 if (requestSession != session || !talkOpen) return;
                 waiting = false;
                 native.ShowError(error);
-            }, true));
+            }, true, plugin.Memory.PersonalPrompt(follower)));
     }
 
     private void OnNativeClosed()

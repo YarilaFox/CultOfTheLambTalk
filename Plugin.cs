@@ -9,7 +9,7 @@ using UnityEngine;
 
 namespace FollowerTalk;
 
-[BepInPlugin("arikm.cotl.followertalk", "Follower Talk", "0.5.0")]
+[BepInPlugin("arikm.cotl.followertalk", "Follower Talk", "0.5.2")]
 [BepInDependency("io.github.xhayper.COTL_API")]
 public sealed class Plugin : BaseUnityPlugin
 {
@@ -25,12 +25,32 @@ public sealed class Plugin : BaseUnityPlugin
 
     internal const string OpenAi = "OpenAI API";
     internal const string Gemini = "Gemini API";
+    internal const string OpenCode = "OpenCode API";
+    internal const string Compatible = "OpenAI-compatible";
+    internal const string Claude = "Claude API";
+    internal const string Grok = "Grok API";
+    internal const string OpenClaw = "OpenClaw Gateway";
+    internal const string Hermes = "Hermes Agent";
+    internal const string DeepSeek = "DeepSeek API";
+    internal static readonly string[] Providers = { OpenAi, Gemini, Claude, Grok,
+        OpenCode, OpenClaw, Hermes, DeepSeek, Compatible };
     internal static Plugin Instance { get; private set; } = null!;
     internal ConfigEntry<string> Provider { get; private set; } = null!;
     internal ConfigEntry<string> OpenAiModel { get; private set; } = null!;
     internal ConfigEntry<string> GeminiModel { get; private set; } = null!;
+    internal ConfigEntry<string> OpenCodeModel { get; private set; } = null!;
+    internal ConfigEntry<string> CompatibleModel { get; private set; } = null!;
+    internal ConfigEntry<string> CompatibleEndpoint { get; private set; } = null!;
+    internal ConfigEntry<string> ClaudeModel { get; private set; } = null!;
+    internal ConfigEntry<string> GrokModel { get; private set; } = null!;
+    internal ConfigEntry<string> OpenClawModel { get; private set; } = null!;
+    internal ConfigEntry<string> HermesModel { get; private set; } = null!;
+    internal ConfigEntry<string> DeepSeekModel { get; private set; } = null!;
+    internal ConfigEntry<string> OpenClawEndpoint { get; private set; } = null!;
+    internal ConfigEntry<string> HermesEndpoint { get; private set; } = null!;
     internal ConfigEntry<string> LanguageMode { get; private set; } = null!;
     internal ConfigEntry<string> UiLanguageMode { get; private set; } = null!;
+    internal ConfigEntry<string> CustomPrompt { get; private set; } = null!;
     internal string GameLanguageCode
     {
         get
@@ -60,11 +80,23 @@ public sealed class Plugin : BaseUnityPlugin
         Provider = Config.Bind("Conversation", "Provider", OpenAi, "Selected conversation API.");
         OpenAiModel = Config.Bind("Conversation", "OpenAIModel", "gpt-5.6-luna", "OpenAI model ID.");
         GeminiModel = Config.Bind("Conversation", "GeminiModel", "gemini-3.8-flash", "Gemini model ID.");
+        OpenCodeModel = Config.Bind("Conversation", "OpenCodeModel", "kimi-k3", "OpenCode Console model ID.");
+        CompatibleModel = Config.Bind("Conversation", "CompatibleModel", "", "OpenAI-compatible model ID.");
+        CompatibleEndpoint = Config.Bind("Conversation", "CompatibleEndpoint", "http://127.0.0.1:11434/v1", "OpenAI-compatible API base URL.");
+        ClaudeModel = Config.Bind("Conversation", "ClaudeModel", "claude-sonnet-5-5", "Claude model ID.");
+        GrokModel = Config.Bind("Conversation", "GrokModel", "grok-4.7", "Grok model ID.");
+        OpenClawModel = Config.Bind("Conversation", "OpenClawModel", "openclaw/default", "OpenClaw agent ID.");
+        HermesModel = Config.Bind("Conversation", "HermesModel", "hermes-agent", "Hermes model ID.");
+        DeepSeekModel = Config.Bind("Conversation", "DeepSeekModel", "deepseek-flash", "DeepSeek model ID.");
+        OpenClawEndpoint = Config.Bind("Conversation", "OpenClawEndpoint", "http://127.0.0.1:18789/v1", "OpenClaw Gateway API base URL.");
+        HermesEndpoint = Config.Bind("Conversation", "HermesEndpoint", "http://127.0.0.1:8642/v1", "Hermes Agent API base URL.");
         LanguageMode = Config.Bind("Conversation", "Language", TalkLanguage.Auto,
             "Reply language: auto, ru, or en.");
         UiLanguageMode = Config.Bind("Conversation", "InterfaceLanguage", UiText.Game,
             "Interface language: game or a supported language code.");
-        if (Provider.Value != OpenAi && Provider.Value != Gemini) Provider.Value = OpenAi;
+        CustomPrompt = Config.Bind("Conversation", "CustomPrompt", "",
+            "Optional custom follower instructions. Empty uses the built-in prompt.");
+        if (Array.IndexOf(Providers, Provider.Value) < 0) Provider.Value = OpenAi;
         if (!TalkLanguage.IsValid(LanguageMode.Value)) LanguageMode.Value = TalkLanguage.Auto;
         if (!UiText.IsValidMode(UiLanguageMode.Value)) UiLanguageMode.Value = UiText.Game;
         Keys = new KeyStore();
@@ -83,9 +115,16 @@ public sealed class Plugin : BaseUnityPlugin
             prefix: new HarmonyMethod(typeof(NativeDialogue), nameof(NativeDialogue.AllowBackToWork)));
         harmony.Patch(AccessTools.Method(typeof(interaction_FollowerInteraction), "GiveItemRoutine"),
             postfix: new HarmonyMethod(typeof(Plugin), nameof(WrapGiftRoutine)));
+        harmony.Patch(AccessTools.Method(typeof(Lamb.UI.AltarMenu.UIAltarMenuController), "Start"),
+            postfix: new HarmonyMethod(typeof(AltarAnnouncementMenu), nameof(AltarAnnouncementMenu.Install)));
+        harmony.Patch(AccessTools.Method(typeof(Lamb.UI.AltarMenu.UIAltarMenuController), "OnEnable"),
+            postfix: new HarmonyMethod(typeof(AltarAnnouncementMenu), nameof(AltarAnnouncementMenu.Refresh)));
 
         providerSelector = CustomSettingsManager.AddHorizontalSelector("Conversations", "Provider", Provider.Value,
-            new[] { OpenAi, Gemini }, index => Provider.Value = index == 1 ? Gemini : OpenAi);
+            Providers, index =>
+            {
+                if (index >= 0 && index < Providers.Length) Provider.Value = Providers[index];
+            });
         openAiModelSelector = CustomSettingsManager.AddHorizontalSelector("Conversations", "OpenAI model",
             OpenAiModel.Value, ModelChoices(OpenAi), index =>
             {
@@ -135,7 +174,14 @@ public sealed class Plugin : BaseUnityPlugin
         Requests.Update();
     }
 
-    private void LateUpdate() => NativeSettingsLabels.Refresh(UiLanguage);
+    private void LateUpdate()
+    {
+        NativeSettingsLabels.Refresh(UiLanguage);
+        AltarAnnouncementMenu.RefreshActive(UiLanguage);
+    }
+
+    internal void OpenAnnouncement(Lamb.UI.AltarMenu.UIAltarMenuController menu) =>
+        window.OpenAnnouncement(menu);
 
     internal void RefreshSettingsLanguage()
     {
@@ -196,6 +242,13 @@ public sealed class Plugin : BaseUnityPlugin
 
     private string[] ModelChoices(string provider)
     {
+        if (provider == Claude) return new[] { ClaudeModel.Value };
+        if (provider == Grok) return new[] { GrokModel.Value };
+        if (provider == OpenClaw) return new[] { OpenClawModel.Value };
+        if (provider == Hermes) return new[] { HermesModel.Value };
+        if (provider == DeepSeek) return new[] { DeepSeekModel.Value };
+        if (provider == OpenCode) return new[] { OpenCodeModel.Value };
+        if (provider == Compatible) return new[] { CompatibleModel.Value };
         string[] presets = provider == OpenAi
             ? new[] { "gpt-5.6-luna", "gpt-6-luna" }
             : new[] { "gemini-3.8-flash", "gemini-3.6-flash" };

@@ -44,6 +44,9 @@ internal readonly struct ConversationDecision
 
 internal static class ConversationApi
 {
+    internal static string DefaultInstructions(string language) =>
+        language == TalkLanguage.Russian ? InstructionsRu : InstructionsEn;
+
     private const string InstructionsRu =
         "Ты последователь в мире Cult of the Lamb, а не придворный глашатай. " +
         "Говори от своего лица естественно и коротко, обычно 1-2 предложения. " +
@@ -157,7 +160,8 @@ internal static class ConversationApi
     public static IEnumerator Generate(string provider, string model, string key, string language,
         string followerName,
         string followerState, ActionCatalog actions, List<ConversationTurn> history, string? correction,
-        Action<ConversationDecision> success, Action<string> failure, bool giftReaction = false)
+        Action<ConversationDecision> success, Action<string> failure, bool giftReaction = false,
+        string personalPrompt = "")
     {
         if (history.Count == 0 || !history[history.Count - 1].Player)
         {
@@ -199,12 +203,17 @@ internal static class ConversationApi
         };
         string mode = Plugin.Instance.LanguageMode.Value;
         string languageRule = TalkLanguage.ReplyRule(mode, language);
-        string context = (language == TalkLanguage.Russian ? InstructionsRu : InstructionsEn) +
+        string customPrompt = Plugin.Instance.CustomPrompt.Value.Trim();
+        string context = (customPrompt.Length > 0 ? customPrompt : DefaultInstructions(language)) +
             " " + languageRule + TalkLanguage.Pick(language,
                 " Твоё имя: " + followerName + ". Состояние последователя: " + followerState +
                 ". Доступность игровых действий: " + actions.Description,
                 " Your name: " + followerName + ". Follower state: " + followerState +
                 ". Available game actions: " + actions.Description);
+        if (!string.IsNullOrWhiteSpace(personalPrompt))
+            context += TalkLanguage.Pick(language,
+                " Личное дополнение для этого последователя: ",
+                " Personal instructions for this follower: ") + personalPrompt.Trim();
         if (correction != null)
             context += TalkLanguage.Pick(language,
                 " ВАЖНОЕ НАБЛЮДЕНИЕ ПОСЛЕ ПРОВЕРКИ ИГРЫ: " + correction +
@@ -253,7 +262,7 @@ internal static class ConversationApi
                 }
             };
         }
-        else
+        else if (provider == Plugin.OpenAi)
         {
             url = "https://api.openai.com/v1/responses";
             var input = new JArray();
@@ -279,16 +288,57 @@ internal static class ConversationApi
                 }
             };
         }
+        else
+        {
+            bool claude = provider == Plugin.Claude;
+            string baseUrl = provider switch
+            {
+                Plugin.Claude => "https://api.anthropic.com/v1",
+                Plugin.Grok => "https://api.x.ai/v1",
+                Plugin.DeepSeek => "https://api.deepseek.com",
+                Plugin.OpenCode => "https://opencode.ai/inference/openai/v1",
+                Plugin.OpenClaw => Plugin.Instance.OpenClawEndpoint.Value,
+                Plugin.Hermes => Plugin.Instance.HermesEndpoint.Value,
+                _ => Plugin.Instance.CompatibleEndpoint.Value
+            };
+            if (!ValidEndpoint(baseUrl))
+            {
+                failure(UiText.Get(Plugin.Instance.UiLanguage, "api.error") +
+                    " Invalid API URL");
+                yield break;
+            }
+            url = baseUrl.TrimEnd('/') + (claude ? "/messages" : "/chat/completions");
+            var messages = new JArray();
+            if (!claude) messages.Add(new JObject { ["role"] = "system",
+                ["content"] = context + " Return only one JSON object matching this schema: " +
+                    schema.ToString(Newtonsoft.Json.Formatting.None) });
+            foreach (ConversationTurn turn in history)
+                messages.Add(new JObject { ["role"] = turn.Player ? "user" : "assistant",
+                    ["content"] = turn.Text });
+            payload = claude
+                ? new JObject { ["model"] = model, ["system"] = context +
+                    " Return only one JSON object matching this schema: " +
+                    schema.ToString(Newtonsoft.Json.Formatting.None),
+                    ["messages"] = messages, ["max_tokens"] = 1024 }
+                : new JObject { ["model"] = model, ["messages"] = messages,
+                    ["stream"] = false };
+        }
 
         using var request = new UnityWebRequest(url, "POST")
         {
             uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(payload.ToString())),
             downloadHandler = new DownloadHandlerBuffer(),
-            timeout = 40
+            timeout = provider == Plugin.OpenClaw || provider == Plugin.Hermes ? 90 : 40
         };
         request.SetRequestHeader("Content-Type", "application/json");
         if (provider == Plugin.Gemini) request.SetRequestHeader("x-goog-api-key", key);
-        else request.SetRequestHeader("Authorization", "Bearer " + key);
+        else if (provider == Plugin.Claude)
+        {
+            request.SetRequestHeader("x-api-key", key);
+            request.SetRequestHeader("anthropic-version", "2023-06-01");
+        }
+        else if (!string.IsNullOrEmpty(key))
+            request.SetRequestHeader("Authorization", "Bearer " + key);
         yield return request.SendWebRequest();
 
         if (request.result != UnityWebRequest.Result.Success)
@@ -316,7 +366,9 @@ internal static class ConversationApi
         try
         {
             JObject json = JObject.Parse(request.downloadHandler.text);
-            string text = provider == Plugin.Gemini ? ReadGemini(json) : ReadOpenAi(json);
+            string text = provider == Plugin.Gemini ? ReadGemini(json) :
+                provider == Plugin.OpenAi ? ReadOpenAi(json) :
+                provider == Plugin.Claude ? ReadClaude(json) : ReadChat(json);
             if (string.IsNullOrWhiteSpace(text))
             {
                 failure(UiText.Get(Plugin.Instance.UiLanguage, "response.empty"));
@@ -377,6 +429,43 @@ internal static class ConversationApi
                     && part["text"]?.Value<string>() is string text)
                     result.Append(text);
         }
+        return result.ToString();
+    }
+
+    internal static bool LocalEndpoint(string value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out Uri? uri) &&
+        (uri.Host == "127.0.0.1" || uri.Host == "localhost" ||
+         uri.Host == "::1" || uri.Host == "[::1]");
+
+    internal static bool ValidEndpoint(string value)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out Uri? uri) ||
+            !string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Query) ||
+            !string.IsNullOrEmpty(uri.Fragment)) return false;
+        return uri.Scheme == Uri.UriSchemeHttps ||
+            (uri.Scheme == Uri.UriSchemeHttp && LocalEndpoint(value));
+    }
+
+    private static string ReadClaude(JObject json)
+    {
+        var parts = json["content"] as JArray;
+        if (parts == null) return "";
+        var result = new StringBuilder();
+        foreach (JToken part in parts)
+            if (part["type"]?.Value<string>() == "text")
+                result.Append(part["text"]?.Value<string>());
+        return result.ToString();
+    }
+
+    private static string ReadChat(JObject json)
+    {
+        JToken? content = json["choices"]?[0]?["message"]?["content"];
+        if (content?.Type == JTokenType.String) return content.Value<string>() ?? "";
+        if (content is not JArray parts) return "";
+        var result = new StringBuilder();
+        foreach (JToken part in parts)
+            if (part["type"]?.Value<string>() == "text")
+                result.Append(part["text"]?.Value<string>());
         return result.ToString();
     }
 }
