@@ -141,10 +141,10 @@ internal static class FollowerEmotion
                 return false;
             }
             var speaking = state.SetAnimation(DialogueMouthTrack,
-                new Animation("FollowerTalk/mouth", mouthTimelines, talk.Duration), true);
+                new Animation("FollowerTalk/mouth", mouthTimelines, talk.Duration), false);
             speaking.MixDuration = 0f;
             speaking.Alpha = 1f;
-            speaking.TimeScale = 1.5f;
+            speaking.TimeScale = 0f;
             return true;
         }
         catch (Exception error)
@@ -152,6 +152,20 @@ internal static class FollowerEmotion
             Plugin.Instance.LogActionError("mouth animation", error);
             return false;
         }
+    }
+
+    public static void AdvanceSpeakingMouth(Follower? follower)
+    {
+        try
+        {
+            var speaking = follower?.Spine?.AnimationState?.GetCurrent(DialogueMouthTrack);
+            if (speaking?.Animation?.Name != "FollowerTalk/mouth") return;
+            float duration = speaking.Animation.Duration;
+            if (duration <= 0f) return;
+            float step = Mathf.Clamp(duration / 4f, .02f, .08f);
+            speaking.TrackTime = (speaking.TrackTime + step) % duration;
+        }
+        catch (Exception error) { Plugin.Instance.LogActionError("mouth animation", error); }
     }
 
     private static bool IsMouthTimeline(Timeline timeline, SkeletonData data)

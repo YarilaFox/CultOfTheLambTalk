@@ -41,7 +41,6 @@ internal sealed class NativeDialogue
     private Febucci.UI.TextAnimatorPlayer? subscribedTextPlayer;
     private float lastVisibleCharacter;
     private bool mouthSpeaking;
-    private bool mouthOverlay;
 
     public NativeDialogue(Plugin plugin) => this.plugin = plugin;
     private string InputHint => UiText.Get(plugin.UiLanguage, "input.hint");
@@ -68,6 +67,7 @@ internal sealed class NativeDialogue
         if (!MMConversation.mmConversation.TextPlayer.textAnimator.allLettersShown)
         {
             MMConversation.mmConversation.TextPlayer.SkipTypewriter();
+            current.StopSpeaking();
             return false;
         }
         if (current.closeAfterReply) current.closed?.Invoke();
@@ -105,7 +105,7 @@ internal sealed class NativeDialogue
         }
         if (replyVisible)
         {
-            if (mouthSpeaking && Time.unscaledTime - lastVisibleCharacter > .12f)
+            if (mouthSpeaking && Time.unscaledTime - lastVisibleCharacter > .075f)
                 StopSpeaking();
             if (!waiting && !replyFinished &&
                 MMConversation.mmConversation.TextPlayer.textAnimator.allLettersShown)
@@ -337,35 +337,24 @@ internal sealed class NativeDialogue
         else MMConversation.mmConversation.TextPlayer.ShowText(text);
     }
 
-    private void SetFollowerDialogueAnimation(string animation)
-    {
-        try
-        {
-            var state = follower?.Spine?.AnimationState;
-            if (state != null && state.Data.SkeletonData.FindAnimation(animation) != null)
-                state.SetAnimation(1, animation, true);
-        }
-        catch (Exception error) { plugin.LogActionError("dialogue animation", error); }
-    }
-
     private void OnCharacterVisible(char character)
     {
-        if (!IsCurrent() || !replyVisible || waiting || replyFinished ||
-            !char.IsLetterOrDigit(character)) return;
+        if (!IsCurrent() || !replyVisible || waiting || replyFinished) return;
+        if (!char.IsLetterOrDigit(character))
+        {
+            StopSpeaking();
+            return;
+        }
         lastVisibleCharacter = Time.unscaledTime;
-        if (mouthSpeaking) return;
-        mouthOverlay = FollowerEmotion.StartSpeakingMouth(follower);
-        if (!mouthOverlay) SetFollowerDialogueAnimation("talk");
-        mouthSpeaking = true;
+        if (mouthSpeaking) FollowerEmotion.AdvanceSpeakingMouth(follower);
+        else mouthSpeaking = FollowerEmotion.StartSpeakingMouth(follower);
     }
 
     private void StopSpeaking()
     {
         if (!mouthSpeaking) return;
-        if (mouthOverlay) FollowerEmotion.StopSpeakingMouth(follower);
-        else SetFollowerDialogueAnimation("idle");
+        FollowerEmotion.StopSpeakingMouth(follower);
         mouthSpeaking = false;
-        mouthOverlay = false;
     }
 
     private void StopFollowerVoice()
