@@ -41,6 +41,8 @@ internal sealed class NativeDialogue
     private Febucci.UI.TextAnimatorPlayer? subscribedTextPlayer;
     private float lastVisibleCharacter;
     private bool mouthSpeaking;
+    private int visibleLetterEvents;
+    private int mouthStarts;
 
     public NativeDialogue(Plugin plugin) => this.plugin = plugin;
     private string InputHint => UiText.Get(plugin.UiLanguage, "input.hint");
@@ -113,6 +115,8 @@ internal sealed class NativeDialogue
                 replyFinished = true;
                 StopSpeaking();
                 StopFollowerVoice();
+                plugin.LogMouthSync(visibleLetterEvents, mouthStarts,
+                    MMConversation.mmConversation.TextPlayer.useTypeWriter);
                 if (!replyEmotionShown) FollowerEmotion.Apply(follower, replyEmotion);
             }
             return;
@@ -214,6 +218,8 @@ internal sealed class NativeDialogue
     public void BeginThinking(string playerMessage)
     {
         if (!IsCurrent()) return;
+        StopSpeaking();
+        StopFollowerVoice();
         waiting = true;
         thinkingDots = 0;
         nextThinkingFrame = Time.unscaledTime;
@@ -247,6 +253,8 @@ internal sealed class NativeDialogue
         replyEmotion = emotion;
         replyEmotionShown = false;
         replyFinished = false;
+        visibleLetterEvents = 0;
+        mouthStarts = 0;
         StopSpeaking();
         if (emotion != "neutral")
         {
@@ -346,8 +354,13 @@ internal sealed class NativeDialogue
             return;
         }
         lastVisibleCharacter = Time.unscaledTime;
+        visibleLetterEvents++;
         if (mouthSpeaking) FollowerEmotion.AdvanceSpeakingMouth(follower);
-        else mouthSpeaking = FollowerEmotion.StartSpeakingMouth(follower);
+        else
+        {
+            mouthSpeaking = FollowerEmotion.StartSpeakingMouth(follower);
+            if (mouthSpeaking) mouthStarts++;
+        }
     }
 
     private void StopSpeaking()

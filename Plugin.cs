@@ -368,6 +368,10 @@ public sealed class Plugin : BaseUnityPlugin
     internal void LogActionError(string action, System.Exception error) =>
         Logger.LogWarning("Conversation action failed: " + action + " " + error);
 
+    internal void LogMouthSync(int visibleLetters, int starts, bool typewriter) =>
+        Logger.LogInfo("Mouth sync: visible_letters=" + visibleLetters +
+            "; animation_starts=" + starts + "; typewriter=" + typewriter);
+
     internal void LogEmotion(string emotion, string face) =>
         Logger.LogInfo("Conversation emotion: " + emotion + " -> " + face);
 

@@ -16,7 +16,6 @@ internal static class FollowerEmotion
     private static string currentSave = "";
     private static float nextScan;
     private static float nextRefresh;
-    private static bool missingMouthLogged;
 
     public static void RememberDayMood(Follower follower, string emotion, FollowerMemory memory)
     {
@@ -124,27 +123,13 @@ internal static class FollowerEmotion
             var data = state.Data.SkeletonData;
             Animation? talk = data.FindAnimation("talk");
             if (talk == null) return false;
-            var mouthTimelines = new ExposedList<Timeline>();
-            for (int i = 0; i < talk.Timelines.Count; i++)
-            {
-                Timeline timeline = talk.Timelines.Items[i];
-                if (IsMouthTimeline(timeline, data)) mouthTimelines.Add(timeline);
-            }
-            if (mouthTimelines.Count == 0)
-            {
-                if (!missingMouthLogged)
-                {
-                    missingMouthLogged = true;
-                    Plugin.Instance.LogActionError("mouth animation", new InvalidOperationException(
-                        "No separate mouth timelines in follower talk animation; using game talk animation."));
-                }
-                return false;
-            }
             var speaking = state.SetAnimation(DialogueMouthTrack,
-                new Animation("FollowerTalk/mouth", mouthTimelines, talk.Duration), false);
+                new Animation("FollowerTalk/mouth", talk.Timelines, talk.Duration), false);
             speaking.MixDuration = 0f;
             speaking.Alpha = 1f;
             speaking.TimeScale = 0f;
+            if (talk.Duration > 0f)
+                speaking.TrackTime = Mathf.Min(talk.Duration / 4f, .08f);
             return true;
         }
         catch (Exception error)
@@ -167,34 +152,6 @@ internal static class FollowerEmotion
         }
         catch (Exception error) { Plugin.Instance.LogActionError("mouth animation", error); }
     }
-
-    private static bool IsMouthTimeline(Timeline timeline, SkeletonData data)
-    {
-        int slot = timeline switch
-        {
-            AttachmentTimeline attachment => attachment.SlotIndex,
-            DeformTimeline deform => deform.SlotIndex,
-            ColorTimeline color => color.SlotIndex,
-            TwoColorTimeline twoColor => twoColor.SlotIndex,
-            _ => -1
-        };
-        if (slot >= 0 && slot < data.Slots.Count && IsMouthName(data.Slots.Items[slot].Name))
-            return true;
-        int bone = timeline switch
-        {
-            RotateTimeline rotate => rotate.BoneIndex,
-            TranslateTimeline translate => translate.BoneIndex,
-            _ => -1
-        };
-        return bone >= 0 && bone < data.Bones.Count &&
-            IsMouthName(data.Bones.Items[bone].Name);
-    }
-
-    private static bool IsMouthName(string name) =>
-        name.IndexOf("mouth", StringComparison.OrdinalIgnoreCase) >= 0 ||
-        name.IndexOf("jaw", StringComparison.OrdinalIgnoreCase) >= 0 ||
-        name.IndexOf("lip", StringComparison.OrdinalIgnoreCase) >= 0 ||
-        name.IndexOf("tongue", StringComparison.OrdinalIgnoreCase) >= 0;
 
     public static void StopSpeakingMouth(Follower? follower)
     {
