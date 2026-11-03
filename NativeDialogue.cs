@@ -26,6 +26,7 @@ internal sealed class NativeDialogue
     private Action? closed;
     private Action? interrupted;
     private readonly DialogueDraft draft = new();
+    private readonly List<EventInstance> fadingVoices = new();
     private string visibleLine = "";
     private bool waiting;
     private bool replyVisible;
@@ -114,7 +115,7 @@ internal sealed class NativeDialogue
             {
                 replyFinished = true;
                 StopSpeaking();
-                StopFollowerVoice();
+                StopFollowerVoice(fade: true);
                 plugin.LogMouthSync(visibleLetterEvents, mouthStarts,
                     MMConversation.mmConversation.TextPlayer.useTypeWriter);
                 if (!replyEmotionShown) FollowerEmotion.Apply(follower, replyEmotion);
@@ -219,6 +220,7 @@ internal sealed class NativeDialogue
     {
         if (!IsCurrent()) return;
         StopSpeaking();
+        StopPendingFades();
         StopFollowerVoice();
         waiting = true;
         thinkingDots = 0;
@@ -280,6 +282,7 @@ internal sealed class NativeDialogue
         closing = true;
         UnsubscribeTextPlayer();
         StopSpeaking();
+        StopPendingFades();
         FollowerEmotion.Restore(follower);
         if (IsCurrent()) MMConversation.mmConversation.CloseImmediately(true, null, true);
         if (active == this) active = null;
@@ -307,6 +310,7 @@ internal sealed class NativeDialogue
     {
         if (!IsCurrent() || conversation == null) return;
         StopSpeaking();
+        StopPendingFades();
         StopFollowerVoice();
         FollowerEmotion.Restore(follower);
         draft.Clear();
@@ -370,7 +374,7 @@ internal sealed class NativeDialogue
         mouthSpeaking = false;
     }
 
-    private void StopFollowerVoice()
+    private void StopFollowerVoice(bool fade = false)
     {
         if (!IsCurrent() || TalkSoundInstance == null) return;
         try
@@ -378,11 +382,42 @@ internal sealed class NativeDialogue
             var conversationView = MMConversation.mmConversation;
             if (TalkSoundInstance.GetValue(conversationView) is EventInstance sound && sound.isValid())
             {
-                AudioManager.Instance.StopLoop(sound, STOP_MODE.IMMEDIATE);
                 TalkSoundInstance.SetValue(conversationView, default(EventInstance));
+                if (fade) plugin.RunConversation(FadeFollowerVoice(sound));
+                else AudioManager.Instance.StopLoop(sound, STOP_MODE.IMMEDIATE);
             }
         }
         catch (Exception error) { plugin.LogActionError("dialogue voice", error); }
+    }
+
+    private IEnumerator FadeFollowerVoice(EventInstance sound)
+    {
+        const float duration = .22f;
+        float volume = 1f;
+        if (sound.getVolume(out float current) == FMOD.RESULT.OK) volume = current;
+        fadingVoices.Add(sound);
+        float elapsed = 0f;
+        try
+        {
+            while (sound.isValid() && elapsed < duration)
+            {
+                elapsed += Time.unscaledDeltaTime;
+                sound.setVolume(volume * (1f - Mathf.Clamp01(elapsed / duration)));
+                yield return null;
+            }
+        }
+        finally
+        {
+            if (sound.isValid()) AudioManager.Instance.StopLoop(sound, STOP_MODE.IMMEDIATE);
+            fadingVoices.Remove(sound);
+        }
+    }
+
+    private void StopPendingFades()
+    {
+        foreach (EventInstance sound in fadingVoices.ToArray())
+            if (sound.isValid()) AudioManager.Instance.StopLoop(sound, STOP_MODE.IMMEDIATE);
+        fadingVoices.Clear();
     }
 
     private void UnsubscribeTextPlayer()
@@ -399,6 +434,7 @@ internal sealed class NativeDialogue
     {
         UnsubscribeTextPlayer();
         StopSpeaking();
+        StopPendingFades();
         conversation = null;
         if (active == this) active = null;
         if (!closing) (interrupted ?? closed)?.Invoke();

@@ -121,7 +121,7 @@ internal static class FollowerEmotion
             var state = follower.Spine.AnimationState;
             if (state == null) return false;
             var data = state.Data.SkeletonData;
-            Animation? talk = data.FindAnimation("talk");
+            Animation? talk = data.FindAnimation("Conversations/talk-nice1");
             if (talk == null) return false;
             var speaking = state.SetAnimation(DialogueMouthTrack,
                 new Animation("FollowerTalk/mouth", talk.Timelines, talk.Duration), false);
