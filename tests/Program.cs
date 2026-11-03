@@ -39,7 +39,8 @@ foreach (string locale in UiText.Languages)
 {
     if (locale == UiText.Game) continue;
     foreach (string key in new[] { "talk.title", "input.hint", "settings.title",
-        "ui.language", "key.required", "response.invalid" })
+        "ui.language", "key.required", "response.invalid", "conflict.mode",
+        "conflict.off", "conflict.feelings", "conflict.leave" })
         Check(UiText.Get(locale, key) != key, locale + ":" + key);
     if (locale != "en")
         Check(UiText.Get(locale, "talk.title") != UiText.Get("en", "talk.title"),
@@ -73,3 +74,20 @@ draft.Insert(" ");
 Check(draft.Text == "A B", "space inserts at caret");
 Check(draft.Display("hint").Contains("▌"), "visible caret");
 Console.WriteLine("Dialogue editing checks passed.");
+
+Check(FollowerConflictRules.IsValidMode(FollowerConflictRules.Off), "off mode");
+Check(FollowerConflictRules.Level(0) == "calm", "calm level");
+Check(FollowerConflictRules.Level(20) == "hurt", "hurt threshold");
+Check(FollowerConflictRules.Level(45) == "resentful", "resentful threshold");
+Check(FollowerConflictRules.Level(75) == "ready_to_leave", "departure threshold");
+Check(FollowerConflictRules.Apply(95, "deep_hurt") == 100, "grievance cap");
+Check(FollowerConflictRules.Apply(5, "deep_repair") == 0, "repair floor");
+Check(!FollowerConflictRules.AllowDeparture(FollowerConflictRules.Feelings, 100, "leave", false),
+    "feelings mode cannot leave");
+Check(!FollowerConflictRules.AllowDeparture(FollowerConflictRules.MayLeave, 74, "leave", false),
+    "below threshold cannot leave");
+Check(!FollowerConflictRules.AllowDeparture(FollowerConflictRules.MayLeave, 100, "leave", true),
+    "prisoner cannot leave");
+Check(FollowerConflictRules.AllowDeparture(FollowerConflictRules.MayLeave, 75, "leave", false),
+    "model can choose departure at final level");
+Console.WriteLine("Follower conflict checks passed.");

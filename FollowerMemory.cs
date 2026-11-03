@@ -86,6 +86,31 @@ internal sealed class FollowerMemory
             ? state["day_mood"]?.Value<string>() ?? "" : "";
     }
 
+    public int Grievance(Follower follower) =>
+        Math.Max(0, Math.Min(100, FollowerState(follower)["grievance"]?.Value<int>() ?? 0));
+
+    public int ApplyGrievance(Follower follower, string effect)
+    {
+        JObject state = FollowerState(follower);
+        int current = Grievance(follower);
+        int updated = FollowerConflictRules.Apply(current, effect);
+        if (updated != current)
+        {
+            state["grievance"] = updated;
+            Save();
+        }
+        return updated;
+    }
+
+    public bool IsConflictDissenter(Follower follower) =>
+        FollowerState(follower)["conflict_dissenter"]?.Value<bool>() == true;
+
+    public void SetConflictDissenter(Follower follower, bool value)
+    {
+        FollowerState(follower)["conflict_dissenter"] = value;
+        Save();
+    }
+
     public void Remember(Follower follower, string note, string source)
     {
         note = note.Trim();

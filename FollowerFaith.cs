@@ -9,12 +9,12 @@ internal sealed class FollowerFaith
 
     public void FromConversation(Follower follower, string effect)
     {
-        if (effect != "up" && effect != "down") return;
+        if (effect != "up") return;
         int id = follower.Brain.Info.ID;
         int day = DataManager.Instance.CurrentDayIndex;
         if (conversationDay.TryGetValue(id, out int previousDay) && previousDay == day)
             return;
-        if (Change(follower, effect == "up" ? 1 : -1))
+        if (Change(follower, 1))
             conversationDay[id] = day;
     }
 

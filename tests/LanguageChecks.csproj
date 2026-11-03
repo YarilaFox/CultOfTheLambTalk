@@ -9,6 +9,7 @@
     <Compile Include="../TalkLanguage.cs" Link="TalkLanguage.cs" />
     <Compile Include="../UiText.cs" Link="UiText.cs" />
     <Compile Include="../DialogueDraft.cs" Link="DialogueDraft.cs" />
+    <Compile Include="../FollowerConflictRules.cs" Link="FollowerConflictRules.cs" />
     <Compile Include="Program.cs" />
     <EmbeddedResource Include="../Resources/ui.json" LogicalName="FollowerTalk.ui.json" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />

@@ -19,6 +19,7 @@ public sealed class Plugin : BaseUnityPlugin
     private HorizontalSelector? geminiModelSelector;
     private HorizontalSelector? replyLanguageSelector;
     private HorizontalSelector? uiLanguageSelector;
+    private HorizontalSelector? conflictSelector;
     private TalkWindow window = null!;
     private Harmony harmony = null!;
     private string settingsLocale = "";
@@ -51,6 +52,7 @@ public sealed class Plugin : BaseUnityPlugin
     internal ConfigEntry<string> LanguageMode { get; private set; } = null!;
     internal ConfigEntry<string> UiLanguageMode { get; private set; } = null!;
     internal ConfigEntry<string> CustomPrompt { get; private set; } = null!;
+    internal ConfigEntry<string> ConflictMode { get; private set; } = null!;
     internal string GameLanguageCode
     {
         get
@@ -96,9 +98,13 @@ public sealed class Plugin : BaseUnityPlugin
             "Interface language: game or a supported language code.");
         CustomPrompt = Config.Bind("Conversation", "CustomPrompt", "",
             "Optional custom follower instructions. Empty uses the built-in prompt.");
+        ConflictMode = Config.Bind("Conversation", "ConflictMode", FollowerConflictRules.Off,
+            "Off, feelings only, or allow seriously hurt followers to become dissenters and leave.");
         if (Array.IndexOf(Providers, Provider.Value) < 0) Provider.Value = OpenAi;
         if (!TalkLanguage.IsValid(LanguageMode.Value)) LanguageMode.Value = TalkLanguage.Auto;
         if (!UiText.IsValidMode(UiLanguageMode.Value)) UiLanguageMode.Value = UiText.Game;
+        if (!FollowerConflictRules.IsValidMode(ConflictMode.Value))
+            ConflictMode.Value = FollowerConflictRules.Off;
         Keys = new KeyStore();
         Requests = new FollowerRequests();
         Faith = new FollowerFaith();
@@ -148,6 +154,10 @@ public sealed class Plugin : BaseUnityPlugin
             postfix: new HarmonyMethod(typeof(AltarAnnouncementMenu), nameof(AltarAnnouncementMenu.Install)));
         harmony.Patch(AccessTools.Method(typeof(Lamb.UI.AltarMenu.UIAltarMenuController), "OnEnable"),
             postfix: new HarmonyMethod(typeof(AltarAnnouncementMenu), nameof(AltarAnnouncementMenu.Refresh)));
+        harmony.Patch(AccessTools.Method(typeof(Lamb.UI.PrisonerMenu.UIPrisonerMenuController), "OnShowStarted"),
+            postfix: new HarmonyMethod(typeof(PrisonTalkMenu), nameof(PrisonTalkMenu.Install)));
+        harmony.Patch(AccessTools.Method(typeof(Lamb.UI.PrisonerMenu.UIPrisonerMenuController), "OnHideCompleted"),
+            postfix: new HarmonyMethod(typeof(PrisonTalkMenu), nameof(PrisonTalkMenu.Remove)));
 
         providerSelector = CustomSettingsManager.AddHorizontalSelector("Conversations", "Provider", Provider.Value,
             Providers, index =>
@@ -183,6 +193,13 @@ public sealed class Plugin : BaseUnityPlugin
                     RefreshSettingsLanguage();
                 }
             });
+        conflictSelector = CustomSettingsManager.AddHorizontalSelector("Conversations", "Follower conflict",
+            ConflictModeNames()[Array.IndexOf(FollowerConflictRules.Modes, ConflictMode.Value)],
+            ConflictModeNames(), index =>
+            {
+                if (index >= 0 && index < FollowerConflictRules.Modes.Length)
+                    ConflictMode.Value = FollowerConflictRules.Modes[index];
+            });
         keyEditorToggle = CustomSettingsManager.AddToggle("Conversations", "Settings", false,
             enabled =>
             {
@@ -207,10 +224,28 @@ public sealed class Plugin : BaseUnityPlugin
     {
         NativeSettingsLabels.Refresh(UiLanguage);
         AltarAnnouncementMenu.RefreshActive(UiLanguage);
+        PrisonTalkMenu.RefreshActive(UiLanguage);
     }
 
     internal void OpenAnnouncement(Lamb.UI.AltarMenu.UIAltarMenuController menu) =>
         window.OpenAnnouncement(menu);
+
+    internal void OpenPrisonTalk(int followerId,
+        Lamb.UI.PrisonerMenu.UIPrisonerMenuController menu) =>
+        RunConversation(OpenPrisonTalkAfterMenu(followerId, menu));
+
+    private System.Collections.IEnumerator OpenPrisonTalkAfterMenu(int followerId,
+        Lamb.UI.PrisonerMenu.UIPrisonerMenuController menu)
+    {
+        float deadline = Time.unscaledTime + 4f;
+        while (menu != null && Time.unscaledTime < deadline)
+            yield return null;
+        if (menu != null) yield break;
+        GameManager.GetInstance().OnConversationEnd();
+        Follower? follower = FollowerManager.FindFollowerByID(followerId);
+        if (follower != null && follower.Brain != null)
+            window.OpenTalk(follower, null);
+    }
 
     internal void RefreshSettingsLanguage()
     {
@@ -249,6 +284,14 @@ public sealed class Plugin : BaseUnityPlugin
             uiLanguageSelector.Value = uiLanguageSelector.Options[
                 Array.IndexOf(UiText.Languages, UiLanguageMode.Value)];
         }
+        if (conflictSelector != null)
+        {
+            conflictSelector.Category = category;
+            conflictSelector.Text = UiText.Get(language, "conflict.mode");
+            conflictSelector.Options = ConflictModeNames();
+            conflictSelector.Value = conflictSelector.Options[
+                Array.IndexOf(FollowerConflictRules.Modes, ConflictMode.Value)];
+        }
         if (keyEditorToggle != null)
         {
             keyEditorToggle.Category = category;
@@ -261,6 +304,13 @@ public sealed class Plugin : BaseUnityPlugin
 
     private string[] ReplyLanguageNames() =>
         new[] { UiText.Get(UiLanguage, "auto"), "Русский", "English" };
+
+    private string[] ConflictModeNames() => new[]
+    {
+        UiText.Get(UiLanguage, "conflict.off"),
+        UiText.Get(UiLanguage, "conflict.feelings"),
+        UiText.Get(UiLanguage, "conflict.leave")
+    };
 
     private string[] UiLanguageNames()
     {

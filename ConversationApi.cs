@@ -23,7 +23,8 @@ internal readonly struct ConversationTurn
 internal readonly struct ConversationDecision
 {
     public ConversationDecision(string reply, string action, string request,
-        bool endConversation, string faithEffect, string emotion, string memoryNote)
+        bool endConversation, string faithEffect, string emotion, string memoryNote,
+        string grievanceEffect, string leaveIntent)
     {
         Reply = reply;
         Action = action;
@@ -32,6 +33,8 @@ internal readonly struct ConversationDecision
         FaithEffect = faithEffect;
         Emotion = emotion;
         MemoryNote = memoryNote;
+        GrievanceEffect = grievanceEffect;
+        LeaveIntent = leaveIntent;
     }
 
     public string Reply { get; }
@@ -41,6 +44,8 @@ internal readonly struct ConversationDecision
     public string FaithEffect { get; }
     public string Emotion { get; }
     public string MemoryNote { get; }
+    public string GrievanceEffect { get; }
+    public string LeaveIntent { get; }
 }
 
 internal static class ConversationApi
@@ -85,9 +90,9 @@ internal static class ConversationApi
         "Если ты пьян, учитывай возможную прямоту, сбивчивость или переменчивое настроение " +
         "в зависимости от своей личности и текущих мыслей. Не превращай каждую реплику " +
         "в одинаковую пьяную шутку и не теряй смысл разговора. " +
-        "faith_effect оценивает только влияние слов игрока на твою личную веру: " +
+        "faith_effect оценивает только положительное влияние слов игрока на твою личную веру: " +
         "up - проявленная забота, внимание к тебе или исполненное обещание; " +
-        "down - унижение или явный обман; same - нейтральная беседа или поручение. " +
+        "same - любой другой случай, включая оскорбление. Личную обиду отражай отдельно. " +
         "Даже простой искренний вопрос о твоих делах может быть up. " +
         "Поле emotion - твоя реакция на последнее сообщение: neutral, agree, amused, " +
         "angry, sad, worried или uncertain. Выбирай по ситуации и своим текущим мыслям, " +
@@ -140,9 +145,9 @@ internal static class ConversationApi
         "When drunk, your speech may be more candid, distracted or emotionally changeable, " +
         "depending on your personality and current thoughts. Do not repeat the same drunken " +
         "joke or lose the thread of the conversation. " +
-        "faith_effect rates only how the player's words affect your personal faith: up for " +
-        "care, attention, or a kept promise; down for humiliation or clear deceit; same for " +
-        "neutral talk or orders. A sincere question about your wellbeing may be up. " +
+        "faith_effect records only a positive effect on faith: up for care, attention, " +
+        "or a kept promise; same otherwise, including insults. Record personal hurt separately. " +
+        "A sincere question about your wellbeing may be up. " +
         "emotion is your response to the latest message: neutral, agree, amused, angry, " +
         "sad, worried or uncertain. Choose for the situation, not random variety. With low " +
         "faith or resentment you may disagree or be angry. " +
@@ -162,7 +167,8 @@ internal static class ConversationApi
         string followerName,
         string followerState, ActionCatalog actions, List<ConversationTurn> history, string? correction,
         Action<ConversationDecision> success, Action<string> failure, bool giftReaction = false,
-        string personalPrompt = "")
+        string personalPrompt = "", string conflictMode = FollowerConflictRules.Off,
+        int grievance = 0, bool imprisoned = false)
     {
         if (history.Count == 0 || !history[history.Count - 1].Player)
         {
@@ -192,14 +198,18 @@ internal static class ConversationApi
                 },
                 ["end_conversation"] = new JObject { ["type"] = "boolean" },
                 ["faith_effect"] = new JObject { ["type"] = "string",
-                    ["enum"] = new JArray("up", "same", "down") },
+                    ["enum"] = new JArray("up", "same") },
+                ["grievance_effect"] = new JObject { ["type"] = "string",
+                    ["enum"] = new JArray("same", "hurt", "deep_hurt", "repair", "deep_repair") },
+                ["leave_intent"] = new JObject { ["type"] = "string",
+                    ["enum"] = new JArray("stay", "leave") },
                 ["emotion"] = new JObject { ["type"] = "string",
                     ["enum"] = new JArray("neutral", "agree", "amused", "angry",
                         "sad", "worried", "uncertain") },
                 ["memory_note"] = new JObject { ["type"] = "string" }
             },
             ["required"] = new JArray("reply", "action", "request", "end_conversation",
-                "faith_effect", "emotion", "memory_note"),
+                "faith_effect", "grievance_effect", "leave_intent", "emotion", "memory_note"),
             ["additionalProperties"] = false
         };
         string mode = Plugin.Instance.LanguageMode.Value;
@@ -211,6 +221,31 @@ internal static class ConversationApi
                 ". Доступность игровых действий: " + actions.Description,
                 " Your name: " + followerName + ". Follower state: " + followerState +
                 ". Available game actions: " + actions.Description);
+        context += TalkLanguage.Pick(language,
+            " Личная обида на игрока: " + FollowerConflictRules.Level(grievance) +
+                " (" + grievance + "/100). Это не вера в культ. grievance_effect: same, hurt " +
+                "(задело), deep_hurt (серьёзно ранило), repair (помирились), deep_repair " +
+                "(сильное примирение). Оцени только последний обмен; не меняй из-за обычной " +
+                "просьбы или дружеской шутки. При несогласии или обиде говори своими словами. ",
+            " Personal grievance toward the player: " + FollowerConflictRules.Level(grievance) +
+                " (" + grievance + "/100). This is not faith in the cult. grievance_effect: same, " +
+                "hurt, deep_hurt, repair, or deep_repair. Judge only this exchange; ordinary " +
+                "requests or friendly teasing do not change it. Speak in your own voice. ");
+        context += conflictMode == FollowerConflictRules.MayLeave
+            ? TalkLanguage.Pick(language,
+                " Уход возможен только при крайней обиде: если ты действительно решил уйти, " +
+                    "выбери leave_intent=leave. Игра проверит условия и даст шанс помириться. " +
+                    (imprisoned ? "Ты в тюрьме: уйти сейчас нельзя, но можно помириться. " : ""),
+                " Leaving is an option only after serious accumulated hurt. If you truly decide " +
+                    "to go, choose leave_intent=leave; the game validates it and leaves time " +
+                    "for reconciliation. " + (imprisoned ? "You are imprisoned and cannot leave now. " : ""))
+            : conflictMode == FollowerConflictRules.Feelings
+                ? TalkLanguage.Pick(language,
+                    " Уход отключён в настройках: leave_intent=stay. ",
+                    " Leaving is disabled in settings: leave_intent=stay. ")
+                : TalkLanguage.Pick(language,
+                    " Личная обида отключена в настройках: grievance_effect=same, leave_intent=stay. ",
+                    " Personal grievance is disabled in settings: grievance_effect=same, leave_intent=stay. ");
         if (!string.IsNullOrWhiteSpace(personalPrompt))
             context += TalkLanguage.Pick(language,
                 " Личное дополнение для этого последователя: ",
@@ -400,13 +435,17 @@ internal static class ConversationApi
             string action = parsed["action"]?.Value<string>() ?? "";
             string followUp = parsed["request"]?.Value<string>() ?? "";
             string faithEffect = parsed["faith_effect"]?.Value<string>() ?? "";
+            string grievanceEffect = parsed["grievance_effect"]?.Value<string>() ?? "";
+            string leaveIntent = parsed["leave_intent"]?.Value<string>() ?? "";
             string emotion = parsed["emotion"]?.Value<string>() ?? "";
             string memoryNote = parsed["memory_note"]?.Value<string>()?.Trim() ?? "";
             bool? endConversation = parsed["end_conversation"]?.Value<bool>();
             if (reply.Length == 0 || !FollowerActions.IsKnown(action) ||
                 !FollowerRequests.IsKnownRequest(followUp) ||
                 endConversation == null ||
-                (faithEffect != "up" && faithEffect != "same" && faithEffect != "down") ||
+                (faithEffect != "up" && faithEffect != "same") ||
+                !FollowerConflictRules.IsValidEffect(grievanceEffect) ||
+                (leaveIntent != "stay" && leaveIntent != "leave") ||
                 (emotion != "neutral" && emotion != "agree" && emotion != "amused" &&
                  emotion != "angry" && emotion != "sad" && emotion != "worried" &&
                  emotion != "uncertain"))
@@ -415,7 +454,8 @@ internal static class ConversationApi
                 yield break;
             }
             decision = new ConversationDecision(reply, action, followUp,
-                endConversation.Value, faithEffect, emotion, memoryNote);
+                endConversation.Value, faithEffect, emotion, memoryNote,
+                grievanceEffect, leaveIntent);
         }
         catch (Exception error)
         {
