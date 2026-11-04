@@ -41,9 +41,12 @@ internal sealed class NativeDialogue
     private int thinkingDots;
     private Febucci.UI.TextAnimatorPlayer? subscribedTextPlayer;
     private float lastVisibleCharacter;
+    private float lastMouthAdvance;
     private bool mouthSpeaking;
     private int visibleLetterEvents;
     private int mouthStarts;
+    private bool followerVoiceStarted;
+    private float followerVoiceStartedAt;
 
     public NativeDialogue(Plugin plugin) => this.plugin = plugin;
     private string InputHint => UiText.Get(plugin.UiLanguage, "input.hint");
@@ -110,6 +113,8 @@ internal sealed class NativeDialogue
         {
             if (mouthSpeaking && Time.unscaledTime - lastVisibleCharacter > .075f)
                 StopSpeaking();
+            if (followerVoiceStarted && Time.unscaledTime - followerVoiceStartedAt > 1.8f)
+                StopFollowerVoice(fade: true);
             if (!waiting && !replyFinished &&
                 MMConversation.mmConversation.TextPlayer.textAnimator.allLettersShown)
             {
@@ -257,6 +262,7 @@ internal sealed class NativeDialogue
         replyFinished = false;
         visibleLetterEvents = 0;
         mouthStarts = 0;
+        followerVoiceStarted = false;
         StopSpeaking();
         if (emotion != "neutral")
         {
@@ -265,6 +271,7 @@ internal sealed class NativeDialogue
         }
         if (newPage) SwitchToFollower(text);
         else SetVisibleLine(text, false);
+        MuteFollowerVoice();
         MMConversation.mmConversation.NextArrowContainer.SetActive(true);
     }
 
@@ -359,11 +366,23 @@ internal sealed class NativeDialogue
         }
         lastVisibleCharacter = Time.unscaledTime;
         visibleLetterEvents++;
-        if (mouthSpeaking) FollowerEmotion.AdvanceSpeakingMouth(follower);
+        if (!followerVoiceStarted) StartFollowerVoice();
+        if (mouthSpeaking && Time.unscaledTime - lastMouthAdvance >= .12f)
+        {
+            FollowerEmotion.AdvanceSpeakingMouth(follower);
+            lastMouthAdvance = Time.unscaledTime;
+        }
         else
         {
-            mouthSpeaking = FollowerEmotion.StartSpeakingMouth(follower);
-            if (mouthSpeaking) mouthStarts++;
+            if (!mouthSpeaking)
+            {
+                mouthSpeaking = FollowerEmotion.StartSpeakingMouth(follower);
+                if (mouthSpeaking)
+                {
+                    mouthStarts++;
+                    lastMouthAdvance = Time.unscaledTime;
+                }
+            }
         }
     }
 
@@ -376,6 +395,7 @@ internal sealed class NativeDialogue
 
     private void StopFollowerVoice(bool fade = false)
     {
+        followerVoiceStarted = false;
         if (!IsCurrent() || TalkSoundInstance == null) return;
         try
         {
@@ -390,9 +410,28 @@ internal sealed class NativeDialogue
         catch (Exception error) { plugin.LogActionError("dialogue voice", error); }
     }
 
+    private void MuteFollowerVoice()
+    {
+        if (!IsCurrent() || TalkSoundInstance == null || followerVoiceStarted) return;
+        if (TalkSoundInstance.GetValue(MMConversation.mmConversation) is EventInstance sound &&
+            sound.isValid()) sound.setVolume(0f);
+    }
+
+    private void StartFollowerVoice()
+    {
+        if (!IsCurrent() || TalkSoundInstance == null) return;
+        if (TalkSoundInstance.GetValue(MMConversation.mmConversation) is EventInstance sound &&
+            sound.isValid())
+        {
+            sound.setVolume(1f);
+            followerVoiceStarted = true;
+            followerVoiceStartedAt = Time.unscaledTime;
+        }
+    }
+
     private IEnumerator FadeFollowerVoice(EventInstance sound)
     {
-        const float duration = .22f;
+        const float duration = .4f;
         float volume = 1f;
         if (sound.getVolume(out float current) == FMOD.RESULT.OK) volume = current;
         fadingVoices.Add(sound);

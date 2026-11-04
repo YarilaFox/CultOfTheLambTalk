@@ -422,6 +422,10 @@ public sealed class Plugin : BaseUnityPlugin
         Logger.LogInfo("Mouth sync: visible_letters=" + visibleLetters +
             "; animation_starts=" + starts + "; typewriter=" + typewriter);
 
+    internal void LogMouthSetup(int allTimelines, int selectedTimelines) =>
+        Logger.LogInfo("Mouth timeline selection: total=" + allTimelines +
+            "; selected=" + selectedTimelines);
+
     internal void LogEmotion(string emotion, string face) =>
         Logger.LogInfo("Conversation emotion: " + emotion + " -> " + face);
 

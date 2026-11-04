@@ -16,6 +16,7 @@ internal static class FollowerEmotion
     private static string currentSave = "";
     private static float nextScan;
     private static float nextRefresh;
+    private static bool mouthTimelinesLogged;
 
     public static void RememberDayMood(Follower follower, string emotion, FollowerMemory memory)
     {
@@ -123,8 +124,31 @@ internal static class FollowerEmotion
             var data = state.Data.SkeletonData;
             Animation? talk = data.FindAnimation("Conversations/talk-nice1");
             if (talk == null) return false;
+            var mouthTimelines = new ExposedList<Timeline>();
+            foreach (Timeline timeline in talk.Timelines)
+            {
+                string name = timeline switch
+                {
+                    ISlotTimeline slot when slot.SlotIndex >= 0 &&
+                        slot.SlotIndex < data.Slots.Count => data.Slots.Items[slot.SlotIndex].Name,
+                    IBoneTimeline bone when bone.BoneIndex >= 0 &&
+                        bone.BoneIndex < data.Bones.Count => data.Bones.Items[bone.BoneIndex].Name,
+                    _ => ""
+                };
+                if (name.IndexOf("mouth", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    name.IndexOf("jaw", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    name.IndexOf("tongue", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    name.IndexOf("lip", StringComparison.OrdinalIgnoreCase) >= 0)
+                    mouthTimelines.Add(timeline);
+            }
+            if (!mouthTimelinesLogged)
+            {
+                Plugin.Instance.LogMouthSetup(talk.Timelines.Count, mouthTimelines.Count);
+                mouthTimelinesLogged = true;
+            }
+            if (mouthTimelines.Count == 0) return false;
             var speaking = state.SetAnimation(DialogueMouthTrack,
-                new Animation("FollowerTalk/mouth", talk.Timelines, talk.Duration), false);
+                new Animation("FollowerTalk/mouth", mouthTimelines, talk.Duration), false);
             speaking.MixDuration = 0f;
             speaking.Alpha = 1f;
             speaking.TimeScale = 0f;
@@ -155,9 +179,25 @@ internal static class FollowerEmotion
 
     public static void StopSpeakingMouth(Follower? follower)
     {
-        var state = follower?.Spine?.AnimationState;
-        if (state?.GetCurrent(DialogueMouthTrack)?.Animation?.Name == "FollowerTalk/mouth")
-            state.ClearTrack(DialogueMouthTrack);
+        try
+        {
+            var state = follower?.Spine?.AnimationState;
+            var speaking = state?.GetCurrent(DialogueMouthTrack);
+            if (speaking?.Animation?.Name != "FollowerTalk/mouth") return;
+            var timelines = speaking.Animation.Timelines;
+            var skeleton = follower!.Spine.Skeleton;
+            state!.ClearTrack(DialogueMouthTrack);
+            foreach (Timeline timeline in timelines)
+            {
+                if (timeline is ISlotTimeline slot && slot.SlotIndex >= 0 &&
+                    slot.SlotIndex < skeleton.Slots.Count)
+                    skeleton.Slots.Items[slot.SlotIndex].SetToSetupPose();
+                else if (timeline is IBoneTimeline bone && bone.BoneIndex >= 0 &&
+                    bone.BoneIndex < skeleton.Bones.Count)
+                    skeleton.Bones.Items[bone.BoneIndex].SetToSetupPose();
+            }
+        }
+        catch (Exception error) { Plugin.Instance.LogActionError("reset mouth pose", error); }
     }
 
     public static void Apply(Follower? follower, string emotion)
