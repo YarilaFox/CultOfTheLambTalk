@@ -18,6 +18,7 @@ internal sealed partial class TalkWindow
     private FollowerActivity observedActivity;
     private interaction_FollowerInteraction? heldInteraction;
     private string? pendingAction;
+    private bool pendingDeparture;
     private bool talkOpen;
     private bool settingsOpen;
     private bool announcementOpen;
@@ -28,8 +29,13 @@ internal sealed partial class TalkWindow
     private bool revealKey;
     private bool waiting;
     private float previousTimeScale;
+    private UnityEngine.EventSystems.BaseInputModule? gameInputModule;
+    private bool previousGameInputEnabled;
+    private src.UINavigator.UINavigatorNew? gameNavigator;
+    private bool previousNavigationLock;
     private bool pendingFocus;
     private int session;
+    private int settingsSession;
     private string status = "";
     private string editedKey = "";
     private string editedModel = "";
@@ -86,6 +92,7 @@ internal sealed partial class TalkWindow
         observedActivity = activity ?? FollowerContext.Snapshot(follower, interaction);
         heldInteraction = interaction;
         pendingAction = null;
+        pendingDeparture = false;
         talkOpen = true;
         session++;
         status = "";
@@ -99,8 +106,10 @@ internal sealed partial class TalkWindow
 
     public void OpenSettings()
     {
-        if (!settingsOpen) previousTimeScale = Time.timeScale;
+        if (settingsOpen || talkOpen || announcementOpen) return;
+        previousTimeScale = Time.timeScale;
         settingsOpen = true;
+        int openSession = ++settingsSession;
         native.SetSettingsVisible(true);
         selectedProvider = plugin.Provider.Value;
         foreach (string provider in Plugin.Providers)
@@ -126,6 +135,25 @@ internal sealed partial class TalkWindow
         status = "";
         pendingFocus = true;
         if (!talkOpen) Time.timeScale = 0f;
+        plugin.RunConversation(BlockGameMenuInputAfterFrame(openSession));
+    }
+
+    private IEnumerator BlockGameMenuInputAfterFrame(int openSession)
+    {
+        yield return null;
+        if (!settingsOpen || settingsSession != openSession) yield break;
+        gameInputModule = UnityEngine.EventSystems.EventSystem.current?.currentInputModule;
+        if (gameInputModule != null)
+        {
+            previousGameInputEnabled = gameInputModule.enabled;
+            gameInputModule.enabled = false;
+        }
+        gameNavigator = src.UINavigator.UINavigatorNew.Instance;
+        if (gameNavigator != null)
+        {
+            previousNavigationLock = gameNavigator.LockInput;
+            gameNavigator.LockInput = true;
+        }
     }
 
     public void HandleUpdate()
@@ -141,7 +169,7 @@ internal sealed partial class TalkWindow
         if (Input.GetKeyDown(KeyCode.F8))
         {
             if (settingsOpen) CloseSettings();
-            else OpenSettings();
+            else if (!talkOpen && !announcementOpen) OpenSettings();
         }
         if (Input.GetKeyDown(KeyCode.Escape))
         {
@@ -166,9 +194,11 @@ internal sealed partial class TalkWindow
         Follower? follower = selectedFollower;
         interaction_FollowerInteraction? interaction = heldInteraction;
         string? action = pendingAction;
+        bool depart = pendingDeparture;
         selectedFollower = null;
         heldInteraction = null;
         pendingAction = null;
+        pendingDeparture = false;
         session++;
         try { native.Close(); }
         finally
@@ -192,11 +222,29 @@ internal sealed partial class TalkWindow
         }
         if (follower != null && action != null)
             plugin.LogAction(action, true, FollowerActions.TryExecute(follower, action, interaction));
+        if (depart && follower != null && follower.Brain != null &&
+            !DataManager.Instance.Followers_Imprisoned_IDs.Contains(follower.Brain.Info.ID))
+        {
+            follower.Brain.MakeDissenter();
+            if (follower.Brain.Info.CursedState == Thought.Dissenter)
+                plugin.Memory.SetConflictDissenter(follower, true);
+        }
     }
 
     private void CloseSettings()
     {
         settingsOpen = false;
+        settingsSession++;
+        if (gameInputModule != null)
+        {
+            gameInputModule.enabled = previousGameInputEnabled;
+            gameInputModule = null;
+        }
+        if (gameNavigator != null)
+        {
+            gameNavigator.LockInput = previousNavigationLock;
+            gameNavigator = null;
+        }
         revealKey = false;
         editedKey = "";
         stagedKeys.Clear();
@@ -206,6 +254,17 @@ internal sealed partial class TalkWindow
         native.SetSettingsVisible(false);
         native.RefreshInputLanguage();
         if (!talkOpen) Time.timeScale = previousTimeScale;
+    }
+
+    public void Shutdown()
+    {
+        if (settingsOpen) CloseSettings();
+        if (announcementOpen) CloseAnnouncement(false);
+        if (talkOpen)
+        {
+            pendingAction = null;
+            CloseTalk();
+        }
     }
 
     public void OpenAnnouncement(Lamb.UI.AltarMenu.UIAltarMenuController menu)
@@ -340,6 +399,7 @@ internal sealed partial class TalkWindow
     {
         if (message.Length == 0 || selectedFollower == null || waiting) return;
         status = "";
+        pendingAction = null;
         Follower follower = selectedFollower;
         string key = plugin.Keys.Get(plugin.Provider.Value);
         if (string.IsNullOrEmpty(key) &&
@@ -361,6 +421,9 @@ internal sealed partial class TalkWindow
         string followerState = FollowerContext.Capture(follower, language, observedActivity) + " " +
             plugin.Requests.Context(follower, language) + " " +
             plugin.Memory.Context(follower, language);
+        bool imprisoned = DataManager.Instance.Followers_Imprisoned_IDs.Contains(follower.Brain.Info.ID);
+        int grievance = plugin.ConflictMode.Value == FollowerConflictRules.Off
+            ? 0 : plugin.Memory.Grievance(follower);
         plugin.RunConversation(ConversationApi.Generate(plugin.Provider.Value, model, key,
             language, follower.Brain.Info.Name, followerState, actions,
             new List<ConversationTurn>(history), null,
@@ -397,12 +460,14 @@ internal sealed partial class TalkWindow
                             if (requestSession != session || !talkOpen) return;
                             waiting = false;
                             native.ShowError(retryError);
-                        }, personalPrompt: plugin.Memory.PersonalPrompt(follower)));
+                        }, personalPrompt: plugin.Memory.PersonalPrompt(follower),
+                        conflictMode: plugin.ConflictMode.Value, grievance: grievance,
+                        imprisoned: imprisoned));
                 }
                 else
                 {
                     waiting = false;
-                    if (decision.Action != "none") pendingAction = decision.Action;
+                    pendingAction = decision.Action != "none" ? decision.Action : null;
                     plugin.LogAction(decision.Action, available, decision.Action != "none");
                     AddReply(follower, decision);
                 }
@@ -412,13 +477,16 @@ internal sealed partial class TalkWindow
                 if (requestSession != session || !talkOpen) return;
                 waiting = false;
                 native.ShowError(error);
-            }, personalPrompt: plugin.Memory.PersonalPrompt(follower)));
+            }, personalPrompt: plugin.Memory.PersonalPrompt(follower),
+            conflictMode: plugin.ConflictMode.Value, grievance: grievance,
+            imprisoned: imprisoned));
     }
 
     private void AddReply(Follower follower, ConversationDecision decision)
     {
         if (follower == null || follower.Brain == null) return;
         plugin.Faith.FromConversation(follower, decision.FaithEffect);
+        ApplyConflict(follower, decision);
         plugin.Requests.ObserveReply(follower, decision);
         string source = plugin.Memory.History(follower).FindLast(turn => turn.Player).Text ?? "";
         string language = plugin.ContextLanguage(source);
@@ -431,7 +499,33 @@ internal sealed partial class TalkWindow
             pendingAction == "follow" || pendingAction == "stop_follow" ||
             pendingAction == "bless" ||
             pendingAction == "tithe" || pendingAction == "inspire" || pendingAction == "drink" ||
-            (decision.EndConversation && pendingAction != null), decision.Emotion);
+            pendingDeparture || (decision.EndConversation && pendingAction != null), decision.Emotion);
+    }
+
+    private void ApplyConflict(Follower follower, ConversationDecision decision)
+    {
+        if (plugin.ConflictMode.Value == FollowerConflictRules.Off) return;
+        if (plugin.Memory.IsConflictDissenter(follower) &&
+            follower.Brain.Info.CursedState != Thought.Dissenter)
+            plugin.Memory.SetConflictDissenter(follower, false);
+        int before = plugin.Memory.Grievance(follower);
+        int after = plugin.Memory.ApplyGrievance(follower, decision.GrievanceEffect);
+        bool imprisoned = DataManager.Instance.Followers_Imprisoned_IDs.Contains(follower.Brain.Info.ID);
+        if (imprisoned && after < before && plugin.Memory.IsConflictDissenter(follower) &&
+            follower.Brain.Info.CursedState == Thought.Dissenter)
+        {
+            follower.Brain.Stats.Reeducation = Math.Max(0f,
+                follower.Brain.Stats.Reeducation - (before - after));
+            if (after == 0)
+            {
+                follower.Brain.RemoveCurseState(Thought.Dissenter);
+                plugin.Memory.SetConflictDissenter(follower, false);
+            }
+        }
+        pendingDeparture = FollowerConflictRules.AllowDeparture(plugin.ConflictMode.Value,
+            after, decision.LeaveIntent, imprisoned) &&
+            follower.Brain.Info.CursedState == Thought.None;
+        if (pendingDeparture) pendingAction = null;
     }
 
     public void ResumeAfterTithe(Follower follower)
@@ -477,7 +571,9 @@ internal sealed partial class TalkWindow
                 if (requestSession != session || !talkOpen) return;
                 waiting = false;
                 native.ShowError(error);
-            }, true, plugin.Memory.PersonalPrompt(follower)));
+            }, true, plugin.Memory.PersonalPrompt(follower), plugin.ConflictMode.Value,
+            plugin.Memory.Grievance(follower),
+            DataManager.Instance.Followers_Imprisoned_IDs.Contains(follower.Brain.Info.ID)));
     }
 
     private void OnNativeClosed()

@@ -26,6 +26,10 @@
       <HintPath>$(GameDir)\Cult Of The Lamb_Data\Managed\spine-unity.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="FMODUnity">
+      <HintPath>$(GameDir)\Cult Of The Lamb_Data\Managed\FMODUnity.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="UnityEngine.CoreModule">
       <HintPath>$(GameDir)\Cult Of The Lamb_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>

@@ -7,6 +7,7 @@ namespace FollowerTalk;
 internal sealed partial class TalkWindow
 {
     private Texture2D? dimTexture;
+    private Texture2D? panelTexture;
     private GUIStyle? panelStyle, fieldStyle, editorStyle, buttonStyle, tabStyle,
         selectedStyle, titleStyle, labelStyle, hintStyle;
     private Vector2 promptScroll, followerScroll;
@@ -35,6 +36,7 @@ internal sealed partial class TalkWindow
     private void DrawSettings(float width, float height)
     {
         Rect panel = new Rect((width - 900) / 2, (height - 680) / 2, 900, 680);
+        GUI.DrawTexture(panel, panelTexture!);
         GUI.Box(panel, "", panelStyle!);
         GUI.BeginGroup(panel);
         GUI.Label(new Rect(32, 20, 720, 42), Ui("settings.title"), titleStyle!);
@@ -172,13 +174,13 @@ internal sealed partial class TalkWindow
     {
         if (panelStyle != null) return;
         dimTexture = SolidTexture(new Color(0, 0, 0, .82f));
-        Texture2D panel = SolidTexture(new Color(.065f, .067f, .07f));
+        panelTexture = SolidTexture(new Color(.065f, .067f, .07f));
         Texture2D field = SolidTexture(new Color(.12f, .125f, .13f));
         Texture2D button = SolidTexture(new Color(.17f, .175f, .18f));
         Texture2D hover = SolidTexture(new Color(.24f, .245f, .25f));
         Texture2D selected = SolidTexture(new Color(.31f, .12f, .11f));
         Color text = new Color(.94f, .92f, .85f);
-        panelStyle = new GUIStyle(GUI.skin.box) { normal = { background = panel } };
+        panelStyle = new GUIStyle(GUI.skin.box) { normal = { background = panelTexture } };
         fieldStyle = new GUIStyle(GUI.skin.textField)
         {
             fontSize = 21, padding = new RectOffset(12, 12, 8, 8),

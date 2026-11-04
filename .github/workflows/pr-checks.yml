@@ -1,0 +1,23 @@
+name: PR checks
+
+on: pull_request
+
+permissions:
+  contents: read
+
+jobs:
+  portable-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Language, UI, and dialogue tests
+        run: dotnet run --project tests/LanguageChecks.csproj --configuration Release
+      - name: BepInEx metadata and discovery prerequisites
+        run: dotnet run --project tests/PluginMetadataChecks.csproj --configuration Release
+      - name: Patch whitespace
+        run: git diff --check "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}"

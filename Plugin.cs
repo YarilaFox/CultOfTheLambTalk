@@ -9,7 +9,7 @@ using UnityEngine;
 
 namespace FollowerTalk;
 
-[BepInPlugin("arikm.cotl.followertalk", "Follower Talk", "0.5.2")]
+[BepInPlugin("arikm.cotl.followertalk", "Follower Talk", "0.5.5")]
 [BepInDependency("io.github.xhayper.COTL_API")]
 public sealed class Plugin : BaseUnityPlugin
 {
@@ -19,6 +19,7 @@ public sealed class Plugin : BaseUnityPlugin
     private HorizontalSelector? geminiModelSelector;
     private HorizontalSelector? replyLanguageSelector;
     private HorizontalSelector? uiLanguageSelector;
+    private HorizontalSelector? conflictSelector;
     private TalkWindow window = null!;
     private Harmony harmony = null!;
     private string settingsLocale = "";
@@ -51,6 +52,7 @@ public sealed class Plugin : BaseUnityPlugin
     internal ConfigEntry<string> LanguageMode { get; private set; } = null!;
     internal ConfigEntry<string> UiLanguageMode { get; private set; } = null!;
     internal ConfigEntry<string> CustomPrompt { get; private set; } = null!;
+    internal ConfigEntry<string> ConflictMode { get; private set; } = null!;
     internal string GameLanguageCode
     {
         get
@@ -96,9 +98,13 @@ public sealed class Plugin : BaseUnityPlugin
             "Interface language: game or a supported language code.");
         CustomPrompt = Config.Bind("Conversation", "CustomPrompt", "",
             "Optional custom follower instructions. Empty uses the built-in prompt.");
+        ConflictMode = Config.Bind("Conversation", "ConflictMode", FollowerConflictRules.Off,
+            "Off, feelings only, or allow seriously hurt followers to become dissenters and leave.");
         if (Array.IndexOf(Providers, Provider.Value) < 0) Provider.Value = OpenAi;
         if (!TalkLanguage.IsValid(LanguageMode.Value)) LanguageMode.Value = TalkLanguage.Auto;
         if (!UiText.IsValidMode(UiLanguageMode.Value)) UiLanguageMode.Value = UiText.Game;
+        if (!FollowerConflictRules.IsValidMode(ConflictMode.Value))
+            ConflictMode.Value = FollowerConflictRules.Off;
         Keys = new KeyStore();
         Requests = new FollowerRequests();
         Faith = new FollowerFaith();
@@ -115,10 +121,43 @@ public sealed class Plugin : BaseUnityPlugin
             prefix: new HarmonyMethod(typeof(NativeDialogue), nameof(NativeDialogue.AllowBackToWork)));
         harmony.Patch(AccessTools.Method(typeof(interaction_FollowerInteraction), "GiveItemRoutine"),
             postfix: new HarmonyMethod(typeof(Plugin), nameof(WrapGiftRoutine)));
+        try
+        {
+            var faithNotification = AccessTools.DeclaredMethod(typeof(NotificationFaith), "Configure",
+                new[] { typeof(string), typeof(float), typeof(FollowerInfo), typeof(bool),
+                    typeof(NotificationBase.Flair), typeof(bool), typeof(string[]) });
+            if (faithNotification != null)
+                harmony.Patch(faithNotification,
+                    finalizer: new HarmonyMethod(typeof(Plugin), nameof(RecoverFaithNotification)));
+            else Logger.LogWarning("Faith notification patch unavailable; continuing without it.");
+        }
+        catch (Exception error)
+        {
+            Logger.LogWarning("Faith notification patch failed; continuing without it: " + error);
+        }
+        try
+        {
+            var relationshipNotification = AccessTools.DeclaredMethod(typeof(NotificationRelationship), "Configure",
+                new[] { typeof(NotificationCentre.NotificationType), typeof(FollowerInfo),
+                    typeof(FollowerInfo), typeof(NotificationFollower.Animation),
+                    typeof(NotificationFollower.Animation), typeof(NotificationBase.Flair) });
+            if (relationshipNotification != null)
+                harmony.Patch(relationshipNotification,
+                    prefix: new HarmonyMethod(typeof(Plugin), nameof(GuardRelationshipNotification)));
+            else Logger.LogWarning("Relationship notification patch unavailable; continuing without it.");
+        }
+        catch (Exception error)
+        {
+            Logger.LogWarning("Relationship notification patch failed; continuing without it: " + error);
+        }
         harmony.Patch(AccessTools.Method(typeof(Lamb.UI.AltarMenu.UIAltarMenuController), "Start"),
             postfix: new HarmonyMethod(typeof(AltarAnnouncementMenu), nameof(AltarAnnouncementMenu.Install)));
         harmony.Patch(AccessTools.Method(typeof(Lamb.UI.AltarMenu.UIAltarMenuController), "OnEnable"),
             postfix: new HarmonyMethod(typeof(AltarAnnouncementMenu), nameof(AltarAnnouncementMenu.Refresh)));
+        harmony.Patch(AccessTools.Method(typeof(Lamb.UI.PrisonerMenu.UIPrisonerMenuController), "OnShowStarted"),
+            postfix: new HarmonyMethod(typeof(PrisonTalkMenu), nameof(PrisonTalkMenu.Install)));
+        harmony.Patch(AccessTools.Method(typeof(Lamb.UI.PrisonerMenu.UIPrisonerMenuController), "OnHideCompleted"),
+            postfix: new HarmonyMethod(typeof(PrisonTalkMenu), nameof(PrisonTalkMenu.Remove)));
 
         providerSelector = CustomSettingsManager.AddHorizontalSelector("Conversations", "Provider", Provider.Value,
             Providers, index =>
@@ -154,6 +193,13 @@ public sealed class Plugin : BaseUnityPlugin
                     RefreshSettingsLanguage();
                 }
             });
+        conflictSelector = CustomSettingsManager.AddHorizontalSelector("Conversations", "Follower conflict",
+            ConflictModeNames()[Array.IndexOf(FollowerConflictRules.Modes, ConflictMode.Value)],
+            ConflictModeNames(), index =>
+            {
+                if (index >= 0 && index < FollowerConflictRules.Modes.Length)
+                    ConflictMode.Value = FollowerConflictRules.Modes[index];
+            });
         keyEditorToggle = CustomSettingsManager.AddToggle("Conversations", "Settings", false,
             enabled =>
             {
@@ -178,10 +224,28 @@ public sealed class Plugin : BaseUnityPlugin
     {
         NativeSettingsLabels.Refresh(UiLanguage);
         AltarAnnouncementMenu.RefreshActive(UiLanguage);
+        PrisonTalkMenu.RefreshActive(UiLanguage);
     }
 
     internal void OpenAnnouncement(Lamb.UI.AltarMenu.UIAltarMenuController menu) =>
         window.OpenAnnouncement(menu);
+
+    internal void OpenPrisonTalk(int followerId,
+        Lamb.UI.PrisonerMenu.UIPrisonerMenuController menu) =>
+        RunConversation(OpenPrisonTalkAfterMenu(followerId, menu));
+
+    private System.Collections.IEnumerator OpenPrisonTalkAfterMenu(int followerId,
+        Lamb.UI.PrisonerMenu.UIPrisonerMenuController menu)
+    {
+        float deadline = Time.unscaledTime + 4f;
+        while (menu != null && Time.unscaledTime < deadline)
+            yield return null;
+        if (menu != null) yield break;
+        GameManager.GetInstance().OnConversationEnd();
+        Follower? follower = FollowerManager.FindFollowerByID(followerId);
+        if (follower != null && follower.Brain != null)
+            window.OpenTalk(follower, null);
+    }
 
     internal void RefreshSettingsLanguage()
     {
@@ -220,6 +284,14 @@ public sealed class Plugin : BaseUnityPlugin
             uiLanguageSelector.Value = uiLanguageSelector.Options[
                 Array.IndexOf(UiText.Languages, UiLanguageMode.Value)];
         }
+        if (conflictSelector != null)
+        {
+            conflictSelector.Category = category;
+            conflictSelector.Text = UiText.Get(language, "conflict.mode");
+            conflictSelector.Options = ConflictModeNames();
+            conflictSelector.Value = conflictSelector.Options[
+                Array.IndexOf(FollowerConflictRules.Modes, ConflictMode.Value)];
+        }
         if (keyEditorToggle != null)
         {
             keyEditorToggle.Category = category;
@@ -232,6 +304,13 @@ public sealed class Plugin : BaseUnityPlugin
 
     private string[] ReplyLanguageNames() =>
         new[] { UiText.Get(UiLanguage, "auto"), "Русский", "English" };
+
+    private string[] ConflictModeNames() => new[]
+    {
+        UiText.Get(UiLanguage, "conflict.off"),
+        UiText.Get(UiLanguage, "conflict.feelings"),
+        UiText.Get(UiLanguage, "conflict.leave")
+    };
 
     private string[] UiLanguageNames()
     {
@@ -273,7 +352,11 @@ public sealed class Plugin : BaseUnityPlugin
 
     private void OnGUI() => window.Draw();
 
-    private void OnDestroy() => harmony?.UnpatchSelf();
+    private void OnDestroy()
+    {
+        window?.Shutdown();
+        harmony?.UnpatchSelf();
+    }
 
     internal void OpenTalk(Follower follower, interaction_FollowerInteraction? heldInteraction,
         FollowerActivity activity) =>
@@ -335,11 +418,104 @@ public sealed class Plugin : BaseUnityPlugin
     internal void LogActionError(string action, System.Exception error) =>
         Logger.LogWarning("Conversation action failed: " + action + " " + error);
 
+    internal void LogMouthSync(int visibleLetters, int starts, bool typewriter) =>
+        Logger.LogInfo("Mouth sync: visible_letters=" + visibleLetters +
+            "; animation_starts=" + starts + "; typewriter=" + typewriter);
+
+    internal void LogMouthSetup(int allTimelines, int selectedTimelines) =>
+        Logger.LogInfo("Mouth timeline selection: total=" + allTimelines +
+            "; selected=" + selectedTimelines);
+
+    internal void LogMouthClosed(int slotCount) =>
+        Logger.LogInfo("Mouth closed hold: slots=" + slotCount);
+
     internal void LogEmotion(string emotion, string face) =>
         Logger.LogInfo("Conversation emotion: " + emotion + " -> " + face);
 
     internal void LogFaith(string follower, float before, float after) =>
         Logger.LogInfo("Personal faith: " + follower + " " + before + " -> " + after);
+
+    private static Exception? RecoverFaithNotification(Exception? __exception,
+        NotificationFaith __instance, string locKey, float faithDelta,
+        FollowerInfo followerInfo, bool includeName, NotificationBase.Flair flair,
+        bool showAdditionSubtractionSymbols, string[] args)
+    {
+        if (__exception is not NullReferenceException ||
+            __exception.StackTrace?.Contains("SpineExtensions.ConfigureFollowerSkin") != true ||
+            followerInfo == null)
+            return __exception;
+        try
+        {
+            __instance.Configure(locKey, faithDelta, null, includeName, flair,
+                showAdditionSubtractionSymbols, args);
+            Instance.Logger.LogWarning("Faith notification portrait unavailable; displayed without portrait.");
+            return null;
+        }
+        catch (Exception fallbackError)
+        {
+            Instance.Logger.LogWarning("Faith notification fallback failed: " + fallbackError);
+            return __exception;
+        }
+    }
+
+    private static bool GuardRelationshipNotification(ref FollowerInfo followerInfoA,
+        ref FollowerInfo followerInfoB)
+    {
+        try
+        {
+            WorshipperData data = WorshipperData.Instance;
+            if (data == null) return true;
+            FollowerInfo? first = NotificationSkinCopy(followerInfoA, data);
+            FollowerInfo? second = NotificationSkinCopy(followerInfoB, data);
+            if (first == null || second == null)
+            {
+                Instance.Logger.LogWarning("Relationship notification skipped: no valid portrait available.");
+                return false;
+            }
+            followerInfoA = first;
+            followerInfoB = second;
+        }
+        catch (Exception error)
+        {
+            Instance.Logger.LogWarning("Relationship notification portrait check failed: " + error);
+            return false;
+        }
+        return true;
+    }
+
+    private static FollowerInfo? NotificationSkinCopy(FollowerInfo info, WorshipperData data)
+    {
+        if (info == null) return null;
+        var skin = !string.IsNullOrEmpty(info.SkinName) ? data.GetColourData(info.SkinName) : null;
+        if (skin != null && info.Traits != null && info.SkinVariation >= 0 && info.SkinColour >= 0 &&
+            skin.Skin != null && skin.Skin.Count > 0 &&
+            skin.SlotAndColours != null && skin.SlotAndColours.Count > 0 &&
+            !string.IsNullOrEmpty(skin.Skin[Math.Min(info.SkinVariation, skin.Skin.Count - 1)]?.Skin) &&
+            skin.SlotAndColours[Math.Min(info.SkinColour, skin.SlotAndColours.Count - 1)] != null)
+            return info;
+
+        foreach (var fallback in data.Characters)
+        {
+            if (fallback?.Skin == null || fallback.Skin.Count == 0 ||
+                string.IsNullOrEmpty(fallback.Skin[0]?.Skin) ||
+                fallback.SlotAndColours == null || fallback.SlotAndColours.Count == 0 ||
+                fallback.SlotAndColours[0] == null)
+                continue;
+
+            // The original FollowerInfo belongs to the save; only the notification gets this skin.
+            var copy = (FollowerInfo)AccessTools.Method(typeof(object), "MemberwiseClone")
+                .Invoke(info, null);
+            copy.SkinName = fallback.Skin[0].Skin;
+            copy.SkinVariation = 0;
+            copy.SkinColour = 0;
+            copy.Traits ??= new System.Collections.Generic.List<FollowerTrait.TraitType>();
+            Instance.Logger.LogWarning("Relationship notification used a fallback portrait for follower " + info.ID + ".");
+            return copy;
+        }
+
+        Instance.Logger.LogWarning("Relationship notification has no valid fallback portrait for follower " + info.ID + ".");
+        return null;
+    }
 
     internal void LogGiftSelection(string selection) =>
         Logger.LogInfo("Gift menu selection: " + selection);
@@ -352,6 +528,13 @@ public sealed class Plugin : BaseUnityPlugin
         Logger.LogWarning("Conversation API failed: provider=" + provider +
             "; model=" + model + "; status=" + status +
             "; detail=" + detail + "; transport=" + transportError);
+
+    internal void LogResponseParseFailure(string provider, string model, string reason,
+        string finishReason, int envelopeLength, int textLength) =>
+        Logger.LogWarning("Conversation response unreadable: provider=" + provider +
+            "; model=" + model + "; reason=" + reason +
+            "; finish=" + finishReason + "; envelope_chars=" + envelopeLength +
+            "; text_chars=" + textLength);
 
     internal void LogAnnouncement(string message) =>
         Logger.LogInfo("Cult announcement saved (" + message.Length + " characters).");

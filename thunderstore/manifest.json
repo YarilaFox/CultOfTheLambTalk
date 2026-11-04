@@ -1,6 +1,6 @@
 {
   "name": "Follower_Talk",
-  "version_number": "0.5.2",
+  "version_number": "0.5.5",
   "website_url": "https://github.com/YarilaFox/CultOfTheLambTalk",
   "description": "Talk to followers with your own AI provider. They remember conversations and can perform supported in-game tasks.",
   "dependencies": [
