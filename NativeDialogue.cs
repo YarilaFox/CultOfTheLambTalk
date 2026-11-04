@@ -289,6 +289,7 @@ internal sealed class NativeDialogue
         closing = true;
         UnsubscribeTextPlayer();
         StopSpeaking();
+        FollowerEmotion.ReleaseSpeakingMouth(follower);
         StopPendingFades();
         FollowerEmotion.Restore(follower);
         if (IsCurrent()) MMConversation.mmConversation.CloseImmediately(true, null, true);
@@ -317,6 +318,7 @@ internal sealed class NativeDialogue
     {
         if (!IsCurrent() || conversation == null) return;
         StopSpeaking();
+        FollowerEmotion.ReleaseSpeakingMouth(follower);
         StopPendingFades();
         StopFollowerVoice();
         FollowerEmotion.Restore(follower);
@@ -473,6 +475,7 @@ internal sealed class NativeDialogue
     {
         UnsubscribeTextPlayer();
         StopSpeaking();
+        FollowerEmotion.ReleaseSpeakingMouth(follower);
         StopPendingFades();
         conversation = null;
         if (active == this) active = null;

@@ -91,3 +91,11 @@ Check(!FollowerConflictRules.AllowDeparture(FollowerConflictRules.MayLeave, 100,
 Check(FollowerConflictRules.AllowDeparture(FollowerConflictRules.MayLeave, 75, "leave", false),
     "model can choose departure at final level");
 Console.WriteLine("Follower conflict checks passed.");
+
+Check(FollowerAnimationParts.IsMouth("mouth"), "mouth slot belongs to speech");
+Check(FollowerAnimationParts.IsMouth("Jaw_Rotation"), "jaw bone belongs to speech");
+Check(FollowerAnimationParts.IsMouth("tongue_1"), "tongue slot belongs to speech");
+Check(FollowerAnimationParts.IsMouth("lowerLip"), "lip slot belongs to speech");
+Check(!FollowerAnimationParts.IsMouth("eyes"), "eyes remain expressive");
+Check(!FollowerAnimationParts.IsMouth("brows"), "brows remain expressive");
+Console.WriteLine("Follower expression part checks passed.");

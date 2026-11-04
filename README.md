@@ -4,11 +4,11 @@
 <details open>
 <summary><strong>English</strong></summary>
 
-**[Download version 0.5.2](https://github.com/YarilaFox/CultOfTheLambTalk/releases/tag/v0.5.2)** · The source is public for inspection, but it is not open source. See [LICENSE](LICENSE) for the terms of use.
+**[Download version 0.5.5](https://github.com/YarilaFox/CultOfTheLambTalk/releases/tag/v0.5.5)** · The source is public for inspection, but it is not open source. See [LICENSE](LICENSE) for the terms of use.
 
 ## Installation
 
-Download `FollowerTalk-0.5.2.zip` from the release page. Exit the game, install BepInExPack_CultOfTheLamb 5.4.2101, then extract the ZIP into the game's root directory. The archive already includes COTL_API 0.3.4 and its assets; you do not need to install it separately. Detailed manual instructions are in `INSTALL_RU.md` inside the ZIP. The archive does not contain API keys or BepInEx. The COTL_API license is included separately.
+Download `FollowerTalk-0.5.5.zip` from the release page. Exit the game, install BepInExPack_CultOfTheLamb 5.4.2101, then extract the ZIP into the game's root directory. The archive already includes COTL_API 0.3.4 and its assets; you do not need to install it separately. Detailed manual instructions are in `INSTALL_RU.md` inside the ZIP. The archive does not contain API keys or BepInEx. The COTL_API license is included separately.
 
 The mod adds a **Talk** command when interacting with a follower. Input and replies appear in the game's normal dialogue UI: you type directly into the dialogue bubble, and the follower replies there and may choose a supported game action. Enter sends, Ctrl+V pastes, and input opens again after each reply. Esc ends the conversation without opening the pause menu. The camera moves between the follower and the Lamb without unintended zoom changes.
 
@@ -55,11 +55,11 @@ To remove only this mod, delete `BepInEx/plugins/FollowerTalk/`. Do not remove C
 <details>
 <summary><strong>Русский</strong></summary>
 
-**[Скачать версию 0.5.2](https://github.com/YarilaFox/CultOfTheLambTalk/releases/tag/v0.5.2)** · Исходный код доступен для ознакомления, но не является open source: условия использования см. в [LICENSE](LICENSE).
+**[Скачать версию 0.5.5](https://github.com/YarilaFox/CultOfTheLambTalk/releases/tag/v0.5.5)** · Исходный код доступен для ознакомления, но не является open source: условия использования см. в [LICENSE](LICENSE).
 
 ## Установка
 
-Скачайте `FollowerTalk-0.5.2.zip` на странице релиза. После выхода из игры
+Скачайте `FollowerTalk-0.5.5.zip` на странице релиза. После выхода из игры
 установите BepInExPack_CultOfTheLamb 5.4.2101, затем распакуйте ZIP в корневую
 папку игры. В архиве уже есть COTL_API 0.3.4 со всеми его файлами; отдельно
 ставить его не нужно. Подробные шаги есть в `INSTALL_RU.md` внутри ZIP.

@@ -9,7 +9,7 @@ using UnityEngine;
 
 namespace FollowerTalk;
 
-[BepInPlugin("arikm.cotl.followertalk", "Follower Talk", "0.5.2")]
+[BepInPlugin("arikm.cotl.followertalk", "Follower Talk", "0.5.5")]
 [BepInDependency("io.github.xhayper.COTL_API")]
 public sealed class Plugin : BaseUnityPlugin
 {
@@ -425,6 +425,9 @@ public sealed class Plugin : BaseUnityPlugin
     internal void LogMouthSetup(int allTimelines, int selectedTimelines) =>
         Logger.LogInfo("Mouth timeline selection: total=" + allTimelines +
             "; selected=" + selectedTimelines);
+
+    internal void LogMouthClosed(int slotCount) =>
+        Logger.LogInfo("Mouth closed hold: slots=" + slotCount);
 
     internal void LogEmotion(string emotion, string face) =>
         Logger.LogInfo("Conversation emotion: " + emotion + " -> " + face);
