@@ -1,0 +1,31 @@
+{
+  "appearance": {
+    "theme": "amethyst",
+    "accent": "#ff822e",
+    "effect": "glow",
+    "base": "#070403",
+    "surface": "#2c1a17",
+    "text": "#f4eaff",
+    "muted": "#cbaaaa",
+    "border": "#5d4437"
+  },
+  "layout": {
+    "sidebar": [
+      "packages",
+      "releases",
+      "about",
+      "contributors",
+      "languages"
+    ],
+    "profile": [
+      "readme",
+      "pinned",
+      "contributions"
+    ],
+    "profileSidebar": [
+      "info",
+      "achievements",
+      "highlights"
+    ]
+  }
+}
